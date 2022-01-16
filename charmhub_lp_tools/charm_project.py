@@ -1,13 +1,23 @@
-#
-# Copyright 2021, Canonical
-#
+# Copyright 2021 Canonical
+
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+
+   # http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 import collections
 import logging
 from typing import (Any, Dict, List, Tuple, IO)
 import sys
 
-from launchpadtools import LaunchpadTools, TypeLPObject
+from .launchpadtools import LaunchpadTools, TypeLPObject
 
 
 logger = logging.getLogger(__name__)
@@ -334,73 +344,76 @@ class CharmProject:
         no_recipe_branches: List[str] = []
         mentioned_branches: List[str] = []
 
-        for lp_branch in self.lp_repo.branches:
-            mentioned_branches.append(lp_branch.path)
-            branch_info = self.branches.get(lp_branch.path, None)
-            if not branch_info:
-                logger.info('No tracks configured for branch %s, continuing.',
-                            lp_branch.path)
-                no_recipe_branches.append(lp_branch.path)
-                continue
+        if self.lp_repo:
+            for lp_branch in self.lp_repo.branches:
+                mentioned_branches.append(lp_branch.path)
+                branch_info = self.branches.get(lp_branch.path, None)
+                if not branch_info:
+                    logger.info(
+                        'No tracks configured for branch %s, continuing.',
+                        lp_branch.path)
+                    no_recipe_branches.append(lp_branch.path)
+                    continue
 
-            # Strip off refs/head/. And no / allowed, so we'll replace with _
-            branch_name = lp_branch.path[len('refs/heads/'):].replace('/', '-')
-            recipe_format = branch_info['recipe-name']
-            upload = branch_info.get('upload', True)
-            # Get the channels; we have to do a separate recipe for each
-            # channel that doesn't share the same track.  Reminder: channels
-            # are <track>/<risk>
-            channels = branch_info.get('channels', None)
-            if upload and channels:
-                tracks = self._group_channels(channels)
-            else:
-                tracks = (("latest", []),)
-            for track, track_channels in tracks:
-                recipe_name = recipe_format.format(
-                    project=self.lp_project.name,
-                    branch=branch_name,
-                    track=track)
-
-                lp_recipe = charm_lp_recipe_map.pop(recipe_name, None)
-                if lp_recipe:
-                    # calculate diff
-                    changed, updated_dict, changes = (
-                        self.lpt.diff_charm_recipe(
-                            recipe=lp_recipe,
-                            # auto_build=branch_info.get('auto-build'),
-                            auto_build=branch_info['auto-build'],
-                            auto_build_channels=branch_info.get(
-                                'build-channels', False),
-                            build_path=branch_info.get('build-path', None),
-                            store_channels=track_channels,
-                            store_upload=branch_info['upload']))
-
-                    all_recipes[recipe_name] = {
-                        'exists': True,
-                        'changed': changed,
-                        'current_recipe': lp_recipe,
-                        'updated_parts': updated_dict,
-                        'changes': changes,
-                    }
+                # Strip off refs/head/. And no / allowed, so we'll replace with _
+                branch_name = (lp_branch.path[len('refs/heads/'):]
+                                    .replace('/', '-'))
+                recipe_format = branch_info['recipe-name']
+                upload = branch_info.get('upload', True)
+                # Get the channels; we have to do a separate recipe for each
+                # channel that doesn't share the same track.  Reminder:
+                # channels are <track>/<risk>
+                channels = branch_info.get('channels', None)
+                if upload and channels:
+                    tracks = self._group_channels(channels)
                 else:
-                    all_recipes[recipe_name] = {
-                        'exists': False,
-                        'changed': False,
-                        'current_recipe': None,
-                        'updated_recipe': None,
-                        'changes': [],
-                    }
-                all_recipes[recipe_name].update({
-                    'build_from': {
-                        'recipe_name': recipe_name,
-                        'branch_info': branch_info,
-                        'lp_branch': lp_branch,
-                        'lp_team': self.lp_team,
-                        'lp_project': self.lp_project,
-                        'store_name': self.charmhub_name,
-                        'channels': track_channels
-                    }
-                })
+                    tracks = (("latest", []),)
+                for track, track_channels in tracks:
+                    recipe_name = recipe_format.format(
+                        project=self.lp_project.name,
+                        branch=branch_name,
+                        track=track)
+
+                    lp_recipe = charm_lp_recipe_map.pop(recipe_name, None)
+                    if lp_recipe:
+                        # calculate diff
+                        changed, updated_dict, changes = (
+                            self.lpt.diff_charm_recipe(
+                                recipe=lp_recipe,
+                                # auto_build=branch_info.get('auto-build'),
+                                auto_build=branch_info['auto-build'],
+                                auto_build_channels=branch_info.get(
+                                    'build-channels', False),
+                                build_path=branch_info.get('build-path', None),
+                                store_channels=track_channels,
+                                store_upload=branch_info['upload']))
+
+                        all_recipes[recipe_name] = {
+                            'exists': True,
+                            'changed': changed,
+                            'current_recipe': lp_recipe,
+                            'updated_parts': updated_dict,
+                            'changes': changes,
+                        }
+                    else:
+                        all_recipes[recipe_name] = {
+                            'exists': False,
+                            'changed': False,
+                            'current_recipe': None,
+                            'updated_recipe': None,
+                            'changes': [],
+                        }
+                    all_recipes[recipe_name].update({
+                        'build_from': {
+                            'recipe_name': recipe_name,
+                            'branch_info': branch_info,
+                            'lp_branch': lp_branch,
+                            'lp_team': self.lp_team,
+                            'lp_project': self.lp_project,
+                            'store_name': self.charmhub_name,
+                            'channels': track_channels
+                        }
+                    })
         return {
             'lp_recipes': lp_recipes,
             'non_config_recipes': charm_lp_recipe_map,
@@ -490,13 +503,16 @@ class CharmProject:
             print(" * Recipes configured in launchpad matching channels:",
                   file=file)
             for name, detail in info['in_config_recipes'].items():
-                branch = (
-                    detail['current_recipe'].git_ref.path[len('refs/heads/'):])
-                channels = ', '.join(detail['current_recipe'].store_channels)
-                print(f"   - {name[:40]:40} - "
-                      f"git branch: {branch[:20]:20} "
-                      f"channels: {channels}",
-                      file=file)
+                if detail['current_recipe']:
+                    branch = (
+                        detail['current_recipe']
+                            .git_ref.path[len('refs/heads/'):])
+                    channels = ', '.join(detail['current_recipe']
+                                         .store_channels)
+                    print(f"   - {name[:40]:40} - "
+                          f"git branch: {branch[:20]:20} "
+                          f"channels: {channels}",
+                          file=file)
 
     @staticmethod
     def _group_channels(channels: List[str],
