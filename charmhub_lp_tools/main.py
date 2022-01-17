@@ -56,8 +56,6 @@ from .charm_project import (
 
 logger = logging.getLogger(__name__)
 
-CWD = os.path.dirname(os.path.realpath(__file__))
-
 
 def check_config_dir_exists(dir_: pathlib.Path) -> pathlib.Path:
     """Validate that the config dir_ exists.
@@ -189,10 +187,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description='Configure launchpad projects for charms'
     )
-    default_config_dir = os.path.abspath(os.path.join(CWD, './config'))
+    default_config_dir = os.getcwd()
     parser.add_argument('--config-dir',
                         type=str, default=default_config_dir,
-                        help='directory containing configuration files')
+                        help=('directory containing configuration files. '
+                              'The default is the current working directory.'))
     parser.add_argument('--log', dest='loglevel',
                         type=str.upper,
                         default='ERROR',
