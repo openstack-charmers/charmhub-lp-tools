@@ -293,7 +293,9 @@ class CharmProject:
 
         # Create recipes that are missing and/o update recipes that have
         # changes.
-        for recipe_name, state in current['in_config_recipes']:
+        logger.debug('in_config_recipes={}'.format(
+            current['in_config_recipes']))
+        for recipe_name, state in current['in_config_recipes'].items():
             if state['exists'] and state['changed']:
                 # it's an update
                 lp_recipe = state['current_recipe']
