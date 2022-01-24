@@ -166,12 +166,15 @@ class GroupConfig:
         else:
             self.charm_projects[name] = CharmProject(project_config, self.lpt)
 
-    def projects(self, select: Optional[List[str]]) -> Iterator[CharmProject]:
+    def projects(self, select: Optional[List[str]] = None,
+            ) -> Iterator[CharmProject]:
         """Generator returns a list of projects."""
         if not(select):
             select = None
         for project in self.charm_projects.values():
-            if select is None or project.name in select:
+            if (select is None or
+                    project.launchpad_project in select or
+                    project.charmhub_name in select):
                 yield project
 
 
@@ -250,6 +253,13 @@ def parse_args() -> argparse.Namespace:
         default=False,
         help=('This flag must be supplied to indicate that the sync/apply '
               'command really should be used.'))
+    sync_command.add_argument(
+        '--git-mirror-only',
+        dest='git_mirror_only',
+        action='store_true',
+        default=False,
+        help=('Use this flag to indicate to only setup the git mirroring and'
+              'not set-up the recipes.'))
     sync_command.set_defaults(func=sync_main)
 
     args = parser.parse_args()
@@ -319,9 +329,12 @@ def sync_main(args: argparse.Namespace,
         raise AssertionError(
             "'sync' command issues, but --i-really-mean-it flag not used. "
             "Abandoning.")
+    if args.git_mirror_only:
+        logger.info("Only ensuring mirroring of git repositories.")
     for charm_project in gc.projects(select=args.charms):
         charm_project.ensure_git_repository()
-        charm_project.ensure_charm_recipes()
+        if not(args.git_mirror_only):
+            charm_project.ensure_charm_recipes()
 
 
 def setup_logging(loglevel: str) -> None:
@@ -337,10 +350,10 @@ def main():
     args = parse_args()
     setup_logging(args.loglevel)
 
-    logging.info('Using config dir %s', args.config_dir)
-
     config_dir = check_config_dir_exists(
-        pathlib.Path(os.fspath(args.config_dir)))
+        pathlib.Path(os.fspath(args.config_dir)).resolve())
+    logger.info('Using config dir %s (full: %s)',
+        args.config_dir, config_dir)
 
     # # Load the various project group configurations
     files = get_group_config_filenames(config_dir,
@@ -350,6 +363,13 @@ def main():
 
     gc = GroupConfig(lpt)
     gc.load_files(files)
+    if not list(gc.projects()):
+        logger.error('No projects found; '
+                     'are you sure the path is correct?: %s', config_dir)
+        sys.exit(1)
+    if not list(gc.projects(select=args.charms)):
+        logger.error('No charms found; are you sure the arguments are correct')
+        sys.exit(1)
 
     # Call the function associated with the sub-command.
     args.func(args, gc)
@@ -365,6 +385,9 @@ def cli_main():
     except AssertionError as e:
         logger.error(str(e))
         sys.exit(1)
+    except Exception as e:
+        logger.error("Unexpected error: %s", str(e))
+        raise
 
 
 if __name__ == '__main__':
