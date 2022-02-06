@@ -218,6 +218,7 @@ class CharmProject:
                         self.repository)
             self._lp_repo = self.lpt.import_repository(
                 self.lp_team, self.lp_project, self.repository)
+            self.lp_repo.lp_refresh()
         else:
             logger.debug('Git repository for project %s and '
                          '%s already exists.',
