@@ -282,6 +282,16 @@ def parse_args() -> argparse.Namespace:
         default=False,
         help=('Use this flag to indicate to only setup the git mirroring and'
               'not set-up the recipes.'))
+    sync_command.add_argument(
+        '-b', '--git-branch',
+        dest="git_branches",
+        action='append',
+        metavar='GIT_BRANCH',
+        type=str,
+        help=('Git branch name to sync recipe for.  Can be used multiple '
+              'times.  If not included, then all branches for the charm '
+              'will be synced.  If a charm doesn\'t have the branch then '
+              'it will be ignored.'))
     sync_command.set_defaults(func=sync_main)
     # check-builds
     check_builds_commands = subparser.add_parser(
@@ -373,7 +383,7 @@ def sync_main(args: argparse.Namespace,
     for charm_project in gc.projects(select=args.charms):
         charm_project.ensure_git_repository()
         if not(args.git_mirror_only):
-            charm_project.ensure_charm_recipes()
+            charm_project.ensure_charm_recipes(args.git_branches)
 
 
 def check_builds_main(args: argparse.Namespace,

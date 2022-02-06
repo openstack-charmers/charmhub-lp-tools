@@ -16,10 +16,13 @@ import collections
 import logging
 import subprocess
 import tempfile
+from typing import (Any, Dict, List, Tuple, IO, Optional)
 import sys
+import time
+
+import lazr.restfulclient.errors
 
 from contextlib import suppress
-from typing import (Any, Dict, List, Tuple, IO)
 
 import requests
 
@@ -282,8 +285,12 @@ class CharmProject:
                 f'and project {lp_project.name}')
         return lp_repo
 
-    def ensure_charm_recipes(self) -> None:
+    def ensure_charm_recipes(self, branches: Optional[List[str]] = None,
+                             ) -> None:
         """Ensure charm recipes in Launchpad matches CharmProject's conf.
+
+        :param branches: If supplied, then filter the recipes based on the
+            branches supplied.
         """
         print(f'Checking charm recipes for charm {self.name}')
         logger.debug(str(self))
@@ -301,7 +308,7 @@ class CharmProject:
                 self.launchpad_project)
             return
 
-        current = self._calc_recipes_for_repo()
+        current = self._calc_recipes_for_repo(filter_by=branches)
         if current['missing_branches_in_repo']:
             # This means that there are required channels, but no branches in
             # the repo; need to log this fact.
@@ -324,9 +331,9 @@ class CharmProject:
             if state['exists'] and state['changed']:
                 # it's an update
                 lp_recipe = state['current_recipe']
-                for rpart, battr in state['updated_parts']:
                 print(f'Charm recipe {lp_recipe.name} has changes. Saving.')
                 print("Changes: {}".format(", ".join(state['changes'])))
+                for rpart, battr in state['updated_parts'].items():
                     setattr(lp_recipe, rpart, battr)
                 lp_recipe.lp_save()
             elif not(state['exists']):
@@ -352,7 +359,8 @@ class CharmProject:
         #  currently as its not clear that we want to remove them automatically
         #  (yet).
 
-    def _calc_recipes_for_repo(self) -> Dict:
+    def _calc_recipes_for_repo(self, filter_by: Optional[List[str]] = None,
+                               ) -> Dict:
         """Calculate the set of recipes for a repo based on the config.
 
         Return a calculated set of repo branches, channels, recipe names and
@@ -360,6 +368,10 @@ class CharmProject:
 
         The repo_branches is an OrderedDict of repo branch -> List[recipe_name]
         The channels ...
+
+        :param filter_by: filter the recipes based on the branches passed.
+        :returns: A dictionary of recipes for the repo filtered by branches if
+            supplied.
         """
         lp_recipes = self.lpt.get_charm_recipes(self.lp_team, self.lp_project)
         charm_lp_recipe_map = {recipe.name: recipe for recipe in lp_recipes}
@@ -372,6 +384,15 @@ class CharmProject:
         if self.lp_repo:
             for lp_branch in self.lp_repo.branches:
                 mentioned_branches.append(lp_branch.path)
+                # filter_by is a list of branches, but lp_branch.path includes
+                # the "refs/heads/" part, so we actually need a more complex
+                # filter below
+                if filter_by:
+                    _branch = lp_branch.path
+                    if _branch.startswith("refs/heads/"):
+                        _branch = _branch[len("refs/heads/"):]
+                    if _branch not in filter_by:
+                        continue
                 branch_info = self.branches.get(lp_branch.path, None)
                 if not branch_info:
                     logger.info(
