@@ -241,8 +241,23 @@ class CharmProject:
 
         if not self.lp_project.vcs:
             logger.info('Setting project %s vcs to Git', self.lp_project.name)
+            self._lp_project = None  # force a refetch of the project
             self.lp_project.vcs = 'Git'
-            self.lp_project.lp_save()
+            attempts = 0
+            while True:
+                try:
+                    self.lp_project.lp_save()
+                    break
+                except lazr.restfulclient.errors.PreconditionFailed:
+                    if attempts > 5:
+                        logger.error("Repeated Precondition failure!")
+                        raise
+                    logger.info(
+                        'Got precondition error; refetching project and '
+                        'trying again.')
+                    time.sleep(5.0)
+                    self._lp_project = None  # force a refetch of the project
+                    attempts += 1
 
         return self.lp_repo
 
