@@ -269,7 +269,7 @@ class CharmProject:
     def ensure_charm_recipes(self) -> None:
         """Ensure charm recipes in Launchpad matches CharmProject's conf.
         """
-        logger.info('Checking charm recipes for charm %s', self.name)
+        print(f'Checking charm recipes for charm {self.name}')
         logger.debug(str(self))
         try:
             self.lp_project
@@ -289,15 +289,15 @@ class CharmProject:
         if current['missing_branches_in_repo']:
             # This means that there are required channels, but no branches in
             # the repo; need to log this fact.
-            logger.info(
+            print(
                 "The following branches are missing from the repository "
                 "but are configured as branches for recipes.")
             for branch in current['missing_branches_in_repo']:
-                logger.info(" - %s", branch)
+                print(f" - {branch}")
         any_changes = (all(not(r['exists']) or r['changed']
                            for r in current['in_config_recipes'].values()))
         if not(any_changes):
-            logger.info("No changes needed.")
+            print("No changes needed.")
             return
 
         # Create recipes that are missing and/o update recipes that have
@@ -308,14 +308,13 @@ class CharmProject:
             if state['exists'] and state['changed']:
                 # it's an update
                 lp_recipe = state['current_recipe']
-                logger.info('Charm recipe %s has changes. Saving.',
-                            lp_recipe.name)
-                logger.debug("Changes: {}".format(", ".join(state['changes'])))
                 for rpart, battr in state['updated_parts']:
+                print(f'Charm recipe {lp_recipe.name} has changes. Saving.')
+                print("Changes: {}".format(", ".join(state['changes'])))
                     setattr(lp_recipe, rpart, battr)
                 lp_recipe.lp_save()
             elif not(state['exists']):
-                logger.info('Creating charm recipe for %s', recipe_name)
+                print(f'Creating charm recipe for {recipe_name}')
                 build_from = state['build_from']
                 lp_recipe = self.lpt.create_charm_recipe(
                     recipe_name=recipe_name,
@@ -326,11 +325,10 @@ class CharmProject:
                     project=self.lp_project,
                     store_name=self.charmhub_name,
                     channels=build_from['channels'])
-                logger.info('Created charm recipe %s', lp_recipe.name)
+                print(f'Created charm recipe {lp_recipe.name}')
 
             else:
-                logger.info('No changes needed for charm recipe %s',
-                            recipe_name)
+                print(f'No changes needed for charm recipe {recipe_name}')
 
         # TODO (wolsen) Check to see if there are any remaining charm recipes
         #  configured in Launchpad and remove them (?). Remaining charm recipes
