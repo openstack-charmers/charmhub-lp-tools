@@ -167,14 +167,15 @@ class LaunchpadTools:
                      "\n".join(f"  - {r.name}" for r in recipes))
         return recipes
 
-    def update_charm_recipe(self,
-                            recipe: TypeLPObject,
-                            auto_build: bool = False,
-                            auto_build_channels: bool = False,
-                            build_path: Optional[str] = None,
-                            store_channels: Optional[List[str]] = None,
-                            store_upload: bool = False,
-                            ) -> bool:
+    def update_charm_recipe(
+            self,
+            recipe: TypeLPObject,
+            auto_build: bool = False,
+            auto_build_channels: Optional[Dict[str, str]] = None,
+            build_path: Optional[str] = None,
+            store_channels: Optional[List[str]] = None,
+            store_upload: bool = False,
+        ) -> bool:
         """Updates the charm_recipe to match the requested configuration in
         the track_info.
 
@@ -202,14 +203,15 @@ class LaunchpadTools:
 
         return changed
 
-    def diff_charm_recipe(self,
-                          recipe: TypeLPObject,
-                          auto_build: bool = False,
-                          auto_build_channels: bool = False,
-                          build_path: Optional[str] = None,
-                          store_channels: Optional[List[str]] = None,
-                          store_upload: bool = False,
-                          ) -> Tuple[bool, Dict[str, Any], List[str]]:
+    def diff_charm_recipe(
+            self,
+            recipe: TypeLPObject,
+            auto_build: bool = False,
+            auto_build_channels: Optional[Dict[str, str]] = None,
+            build_path: Optional[str] = None,
+            store_channels: Optional[List[str]] = None,
+            store_upload: bool = False,
+        ) -> Tuple[bool, Dict[str, Any], List[str]]:
         """Returns Updates the charm_recipe to match the required config.
 
         :param recipe: the charm recipe to update

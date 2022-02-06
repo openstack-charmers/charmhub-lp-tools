@@ -409,7 +409,7 @@ class CharmProject:
                                 # auto_build=branch_info.get('auto-build'),
                                 auto_build=branch_info['auto-build'],
                                 auto_build_channels=branch_info.get(
-                                    'build-channels', False),
+                                    'build-channels', None),
                                 build_path=branch_info.get('build-path', None),
                                 store_channels=track_channels,
                                 store_upload=branch_info['upload']))
