@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import logging
+import functools
 from typing import (Any, Dict, List, Optional, Tuple)
 import sys
 
@@ -127,6 +128,15 @@ class LaunchpadTools:
         )
         return code_import.git_repository
 
+    @functools.cache
+    def _charm_recipes(self, owner: TypeLPObject):
+        logger.debug('Getting fresh charm recipes from launchpad')
+        recipes = []
+        for recipe in self.lp.charm_recipes.findByOwner(owner=owner):
+            recipes.append(recipe)
+
+        return recipes
+
     def get_charm_recipes(self,
                           owner: TypeLPObject,
                           project: TypeLPObject
@@ -147,8 +157,8 @@ class LaunchpadTools:
         """
         logger.info('Fetching charm recipes for target=%s', project.name)
         recipes = list(
-            filter(lambda r: r.project == project,
-                   self.lp.charm_recipes.findByOwner(owner=owner)))
+            filter(lambda r: r.project_link == project.self_link,
+                   self._charm_recipes(owner.self_link)))
         logger.debug(" -- found recipes:\n%s",
                      "\n".join(f"  - {r.name}" for r in recipes))
         return recipes
@@ -261,4 +271,9 @@ class LaunchpadTools:
             pass
         logger.debug("Creating recipe with the following args: %s",
                      recipe_args)
+
+        # invalidate cache of charm recipes so next call contains this newly
+        # created recipe.
+        self._charm_recipes.cache_clear()
+
         return self.lp.charm_recipes.new(**recipe_args)
