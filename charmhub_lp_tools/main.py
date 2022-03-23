@@ -38,6 +38,7 @@ import collections
 import collections.abc
 import logging
 import json
+import operator
 import os
 import pathlib
 import pprint
@@ -395,7 +396,8 @@ def check_builds_main(args: argparse.Namespace,
             table_builds_add_rows(t, builds, args.detect_error)
 
     if args.format == 'plain':
-        print(t)
+        print(t.get_string(sort_key=operator.itemgetter(0, 1, 2),
+                           sortby="Recipe Name"))
     elif args.format == 'json':
         print(json.dumps(builds))
     else:
