@@ -382,7 +382,8 @@ def check_builds_main(args: argparse.Namespace,
     :param gc: The GroupConfig; i.e. all the charms and their config.
     """
     t = PrettyTable()
-    cols = ['Recipe Name', 'Channels', 'Arch', 'State', 'Age', 'Build Log']
+    cols = ['Recipe Name', 'Channels', 'Arch', 'State', 'Age', 'Revision',
+            'Build Log']
     if args.detect_error:
         cols.append('Error')
 
@@ -415,10 +416,16 @@ def table_builds_add_rows(t, builds, detect_error):
             else:
                 build_log = ''
 
+            try:
+                # git commit hash short version
+                revision = build['revision'][:7]
+            except Exception as ex:
+                logger.debug((f'Cannot get git commit hash short version: '
+                              f'{build["revision"]}'))
+                revision = None
             row = [
                 recipe_name, ', '.join(build['store_channels']), arch_name,
-                build['buildstate'], age,
-                build_log,
+                build['buildstate'], age, revision, build_log,
             ]
 
             if detect_error:

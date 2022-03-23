@@ -595,6 +595,7 @@ class CharmProject:
                         'buildstate': build.buildstate,
                         'build_log_url': build.build_log_url,
                         'error_detected': error_detected,
+                        'revision': build.revision_id,
                     }
         return builds
 
