@@ -596,6 +596,9 @@ class CharmProject:
                         'build_log_url': build.build_log_url,
                         'error_detected': error_detected,
                         'revision': build.revision_id,
+                        'store_upload_revision': build.store_upload_revision,
+                        'store_upload_status': build.store_upload_status,
+                        'store_upload_error_message': build.store_upload_error_message,
                     }
         return builds
 

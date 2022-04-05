@@ -383,7 +383,7 @@ def check_builds_main(args: argparse.Namespace,
     """
     t = PrettyTable()
     cols = ['Recipe Name', 'Channels', 'Arch', 'State', 'Age', 'Revision',
-            'Build Log']
+            'Store Rev', 'Build Log']
     if args.detect_error:
         cols.append('Error')
 
@@ -423,9 +423,15 @@ def table_builds_add_rows(t, builds, detect_error):
                 logger.debug((f'Cannot get git commit hash short version: '
                               f'{build["revision"]}'))
                 revision = None
+            if build['store_upload_status'] == 'Uploaded':
+                store_rev = build['store_upload_revision']
+            else:
+                store_rev = build['store_upload_error_message']
             row = [
                 recipe_name, ', '.join(build['store_channels']), arch_name,
-                build['buildstate'], age, revision, build_log,
+                build['buildstate'], age, revision,
+                store_rev,
+                build_log,
             ]
 
             if detect_error:
