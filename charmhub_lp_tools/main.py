@@ -400,7 +400,7 @@ def check_builds_main(args: argparse.Namespace,
         print(t.get_string(sort_key=operator.itemgetter(0, 1, 2),
                            sortby="Recipe Name"))
     elif args.format == 'json':
-        print(json.dumps(builds))
+        print(json.dumps(builds, default=str))
     else:
         raise ValueError(f'Unknown output format: {args.format}')
 
