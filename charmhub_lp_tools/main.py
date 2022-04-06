@@ -107,7 +107,8 @@ def get_group_config_filenames(config_dir: pathlib.Path,
     if not project_group_names:
         files = list(config_dir.glob(f'*{extension}'))
     else:
-        files = [config_dir / f'{group}{extension}' for group in project_group_names]
+        files = [config_dir / f'{group}{extension}'
+                 for group in project_group_names]
         # validate that the files actually exist
         for file in files:
             if not(file.exists()):
@@ -182,7 +183,7 @@ class GroupConfig:
             self.charm_projects[name] = CharmProject(project_config, self.lpt)
 
     def projects(self, select: Optional[List[str]] = None,
-            ) -> Iterator[CharmProject]:
+                 ) -> Iterator[CharmProject]:
         """Generator returns a list of projects."""
         if not(select):
             select = None
@@ -434,7 +435,7 @@ def table_builds_add_rows(t: PrettyTable,
             try:
                 # git commit hash short version
                 revision = build['revision'][:7]
-            except Exception as ex:
+            except Exception:
                 logger.debug((f'Cannot get git commit hash short version: '
                               f'{build["revision"]}'))
                 revision = None

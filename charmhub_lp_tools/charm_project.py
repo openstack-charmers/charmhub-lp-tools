@@ -404,7 +404,7 @@ class CharmProject:
                 # Strip off refs/head/. And no / allowed, so we'll replace
                 # with _
                 branch_name = (lp_branch.path[len('refs/heads/'):]
-                                    .replace('/', '-'))
+                               .replace('/', '-'))
                 recipe_format = branch_info['recipe-name']
                 upload = branch_info.get('upload', True)
                 # Get the channels; we have to do a separate recipe for each
@@ -553,7 +553,7 @@ class CharmProject:
                 if detail['current_recipe']:
                     branch = (
                         detail['current_recipe']
-                            .git_ref.path[len('refs/heads/'):])
+                        .git_ref.path[len('refs/heads/'):])
                     channels = ', '.join(detail['current_recipe']
                                          .store_channels)
                     print(f"   - {name[:40]:40} - "
@@ -633,7 +633,8 @@ class CharmProject:
                         'revision': build.revision_id,
                         'store_upload_revision': build.store_upload_revision,
                         'store_upload_status': build.store_upload_status,
-                        'store_upload_error_message': build.store_upload_error_message,
+                        'store_upload_error_message':
+                            build.store_upload_error_message,
                     }
         return builds
 
@@ -711,4 +712,4 @@ class CharmProject:
                 f"{'charmhub_name':>{width}}: {self.charmhub_name}\n"
                 f"{'launchpad_project':>{width}}: {self.launchpad_project}\n"
                 f"{'repository':>{width}}: {self.repository}\n"
-                + branches_str)
+                f"{branches_str}")

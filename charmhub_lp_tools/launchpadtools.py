@@ -33,6 +33,7 @@ try:
 except AttributeError:
     cache_fn = functools.lru_cache(maxsize=None)
 
+
 def setup_logging(loglevel: str) -> None:
     """Sets up some basic logging."""
     logger.setLevel(getattr(logging, loglevel, 'ERROR'))
@@ -82,10 +83,11 @@ class LaunchpadTools:
         self.lp.git_repositories.setDefaultRepository(  # type: ignore
             target=lp_project, repository=lp_repo)
 
-    def get_git_repository(self,
-                           owner: TypeLPObject,
-                           project: TypeLPObject
-        ) -> TypeLPObject:
+    def get_git_repository(
+            self,
+            owner: TypeLPObject,
+            project: TypeLPObject
+    ) -> TypeLPObject:
         """Returns the reference to the Launchpad git repository by owner and
         project.
 
@@ -103,8 +105,9 @@ class LaunchpadTools:
         logger.debug('Fetching git repositories for target=%s, owner: %s',
                      project.name, owner)
         return next(
-            filter(lambda r: r.owner == owner,
-                   self.lp.git_repositories.getRepositories(target=project)), # type: ignore
+            filter(lambda r: r.owner == owner,  # type: ignore
+                   self.lp.git_repositories.getRepositories(  # type: ignore
+                       target=project)),
             None)
 
     def import_repository(self,
@@ -175,7 +178,7 @@ class LaunchpadTools:
             build_path: Optional[str] = None,
             store_channels: Optional[List[str]] = None,
             store_upload: bool = False,
-        ) -> bool:
+    ) -> bool:
         """Updates the charm_recipe to match the requested configuration in
         the track_info.
 
@@ -211,7 +214,7 @@ class LaunchpadTools:
             build_path: Optional[str] = None,
             store_channels: Optional[List[str]] = None,
             store_upload: bool = False,
-        ) -> Tuple[bool, Dict[str, Any], List[str]]:
+    ) -> Tuple[bool, Dict[str, Any], List[str]]:
         """Returns Updates the charm_recipe to match the required config.
 
         :param recipe: the charm recipe to update
@@ -258,7 +261,7 @@ class LaunchpadTools:
         :param branch_info: a dictionary of relevant parts to create the recipe
         :param channels: a list of channels to target in the charmhub
         """
-        logger.debug(f'branch_info: %s', branch_info)
+        logger.debug('branch_info: %s', branch_info)
         upload = branch_info.get('upload', True)
         recipe_args = {
             'auto_build': branch_info.get('auto-build', True),
