@@ -107,7 +107,8 @@ def get_group_config_filenames(config_dir: pathlib.Path,
     if not project_group_names:
         files = list(config_dir.glob(f'*{extension}'))
     else:
-        files = [config_dir / f'{group}{extension}' for group in project_group_names]
+        files = [config_dir / f'{group}{extension}'
+                 for group in project_group_names]
         # validate that the files actually exist
         for file in files:
             if not(file.exists()):
@@ -182,7 +183,7 @@ class GroupConfig:
             self.charm_projects[name] = CharmProject(project_config, self.lpt)
 
     def projects(self, select: Optional[List[str]] = None,
-            ) -> Iterator[CharmProject]:
+                 ) -> Iterator[CharmProject]:
         """Generator returns a list of projects."""
         if not(select):
             select = None
@@ -282,6 +283,16 @@ def parse_args() -> argparse.Namespace:
         default=False,
         help=('Use this flag to indicate to only setup the git mirroring and'
               'not set-up the recipes.'))
+    sync_command.add_argument(
+        '-b', '--git-branch',
+        dest="git_branches",
+        action='append',
+        metavar='GIT_BRANCH',
+        type=str,
+        help=('Git branch name to sync recipe for.  Can be used multiple '
+              'times.  If not included, then all branches for the charm '
+              'will be synced.  If a charm doesn\'t have the branch then '
+              'it will be ignored.'))
     sync_command.set_defaults(func=sync_main)
     # check-builds
     check_builds_commands = subparser.add_parser(
@@ -373,7 +384,7 @@ def sync_main(args: argparse.Namespace,
     for charm_project in gc.projects(select=args.charms):
         charm_project.ensure_git_repository()
         if not(args.git_mirror_only):
-            charm_project.ensure_charm_recipes()
+            charm_project.ensure_charm_recipes(args.git_branches)
 
 
 def check_builds_main(args: argparse.Namespace,
@@ -399,16 +410,18 @@ def check_builds_main(args: argparse.Namespace,
         if args.format == 'plain':
             table_builds_add_rows(t, builds, args.detect_error)
 
-    if args.format == 'plain':
-        print(t.get_string(sort_key=operator.itemgetter(0, 1, 2),
-                           sortby="Recipe Name"))
-    elif args.format == 'json':
-        print(json.dumps(builds, default=str))
-    else:
-        raise ValueError(f'Unknown output format: {args.format}')
+        if args.format == 'plain':
+            print(t.get_string(sort_key=operator.itemgetter(0, 1, 2),
+                               sortby="Recipe Name"))
+        elif args.format == 'json':
+            print(json.dumps(builds, default=str))
+        else:
+            raise ValueError(f'Unknown output format: {args.format}')
 
 
-def table_builds_add_rows(t, builds, detect_error):
+def table_builds_add_rows(t: PrettyTable,
+                          builds: Dict[str, Dict[str, Dict[str, Any]]],
+                          detect_error: Any):
     """Print builds in plain text format."""
 
     for recipe_name, arch_build in builds.items():
@@ -422,7 +435,7 @@ def table_builds_add_rows(t, builds, detect_error):
             try:
                 # git commit hash short version
                 revision = build['revision'][:7]
-            except Exception as ex:
+            except Exception:
                 logger.debug((f'Cannot get git commit hash short version: '
                               f'{build["revision"]}'))
                 revision = None

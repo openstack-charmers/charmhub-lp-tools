@@ -16,10 +16,13 @@ import collections
 import logging
 import subprocess
 import tempfile
+from typing import (Any, Dict, List, Tuple, IO, Optional)
 import sys
+import time
+
+import lazr.restfulclient.errors
 
 from contextlib import suppress
-from typing import (Any, Dict, List, Tuple, IO)
 
 import requests
 
@@ -218,6 +221,7 @@ class CharmProject:
                         self.repository)
             self._lp_repo = self.lpt.import_repository(
                 self.lp_team, self.lp_project, self.repository)
+            self.lp_repo.lp_refresh()
         else:
             logger.debug('Git repository for project %s and '
                          '%s already exists.',
@@ -241,8 +245,23 @@ class CharmProject:
 
         if not self.lp_project.vcs:
             logger.info('Setting project %s vcs to Git', self.lp_project.name)
+            self._lp_project = None  # force a refetch of the project
             self.lp_project.vcs = 'Git'
-            self.lp_project.lp_save()
+            attempts = 0
+            while True:
+                try:
+                    self.lp_project.lp_save()
+                    break
+                except lazr.restfulclient.errors.PreconditionFailed:
+                    if attempts > 5:
+                        logger.error("Repeated Precondition failure!")
+                        raise
+                    logger.info(
+                        'Got precondition error; refetching project and '
+                        'trying again.')
+                    time.sleep(5.0)
+                    self._lp_project = None  # force a refetch of the project
+                    attempts += 1
 
         return self.lp_repo
 
@@ -266,10 +285,14 @@ class CharmProject:
                 f'and project {lp_project.name}')
         return lp_repo
 
-    def ensure_charm_recipes(self) -> None:
+    def ensure_charm_recipes(self, branches: Optional[List[str]] = None,
+                             ) -> None:
         """Ensure charm recipes in Launchpad matches CharmProject's conf.
+
+        :param branches: If supplied, then filter the recipes based on the
+            branches supplied.
         """
-        logger.info('Checking charm recipes for charm %s', self.name)
+        print(f'Checking charm recipes for charm {self.name}')
         logger.debug(str(self))
         try:
             self.lp_project
@@ -285,19 +308,19 @@ class CharmProject:
                 self.launchpad_project)
             return
 
-        current = self._calc_recipes_for_repo()
+        current = self._calc_recipes_for_repo(filter_by=branches)
         if current['missing_branches_in_repo']:
             # This means that there are required channels, but no branches in
             # the repo; need to log this fact.
-            logger.info(
+            print(
                 "The following branches are missing from the repository "
                 "but are configured as branches for recipes.")
             for branch in current['missing_branches_in_repo']:
-                logger.info(" - %s", branch)
+                print(f" - {branch}")
         any_changes = (all(not(r['exists']) or r['changed']
                            for r in current['in_config_recipes'].values()))
         if not(any_changes):
-            logger.info("No changes needed.")
+            print("No changes needed.")
             return
 
         # Create recipes that are missing and/o update recipes that have
@@ -308,14 +331,13 @@ class CharmProject:
             if state['exists'] and state['changed']:
                 # it's an update
                 lp_recipe = state['current_recipe']
-                logger.info('Charm recipe %s has changes. Saving.',
-                            lp_recipe.name)
-                logger.debug("Changes: {}".format(", ".join(state['changes'])))
-                for rpart, battr in state['updated_parts']:
+                print(f'Charm recipe {lp_recipe.name} has changes. Saving.')
+                print("Changes: {}".format(", ".join(state['changes'])))
+                for rpart, battr in state['updated_parts'].items():
                     setattr(lp_recipe, rpart, battr)
                 lp_recipe.lp_save()
             elif not(state['exists']):
-                logger.info('Creating charm recipe for %s', recipe_name)
+                print(f'Creating charm recipe for {recipe_name}')
                 build_from = state['build_from']
                 lp_recipe = self.lpt.create_charm_recipe(
                     recipe_name=recipe_name,
@@ -326,11 +348,10 @@ class CharmProject:
                     project=self.lp_project,
                     store_name=self.charmhub_name,
                     channels=build_from['channels'])
-                logger.info('Created charm recipe %s', lp_recipe.name)
+                print(f'Created charm recipe {lp_recipe.name}')
 
             else:
-                logger.info('No changes needed for charm recipe %s',
-                            recipe_name)
+                print(f'No changes needed for charm recipe {recipe_name}')
 
         # TODO (wolsen) Check to see if there are any remaining charm recipes
         #  configured in Launchpad and remove them (?). Remaining charm recipes
@@ -338,7 +359,8 @@ class CharmProject:
         #  currently as its not clear that we want to remove them automatically
         #  (yet).
 
-    def _calc_recipes_for_repo(self) -> Dict:
+    def _calc_recipes_for_repo(self, filter_by: Optional[List[str]] = None,
+                               ) -> Dict:
         """Calculate the set of recipes for a repo based on the config.
 
         Return a calculated set of repo branches, channels, recipe names and
@@ -346,6 +368,10 @@ class CharmProject:
 
         The repo_branches is an OrderedDict of repo branch -> List[recipe_name]
         The channels ...
+
+        :param filter_by: filter the recipes based on the branches passed.
+        :returns: A dictionary of recipes for the repo filtered by branches if
+            supplied.
         """
         lp_recipes = self.lpt.get_charm_recipes(self.lp_team, self.lp_project)
         charm_lp_recipe_map = {recipe.name: recipe for recipe in lp_recipes}
@@ -358,6 +384,15 @@ class CharmProject:
         if self.lp_repo:
             for lp_branch in self.lp_repo.branches:
                 mentioned_branches.append(lp_branch.path)
+                # filter_by is a list of branches, but lp_branch.path includes
+                # the "refs/heads/" part, so we actually need a more complex
+                # filter below
+                if filter_by:
+                    _branch = lp_branch.path
+                    if _branch.startswith("refs/heads/"):
+                        _branch = _branch[len("refs/heads/"):]
+                    if _branch not in filter_by:
+                        continue
                 branch_info = self.branches.get(lp_branch.path, None)
                 if not branch_info:
                     logger.info(
@@ -369,7 +404,7 @@ class CharmProject:
                 # Strip off refs/head/. And no / allowed, so we'll replace
                 # with _
                 branch_name = (lp_branch.path[len('refs/heads/'):]
-                                    .replace('/', '-'))
+                               .replace('/', '-'))
                 recipe_format = branch_info['recipe-name']
                 upload = branch_info.get('upload', True)
                 # Get the channels; we have to do a separate recipe for each
@@ -395,7 +430,7 @@ class CharmProject:
                                 # auto_build=branch_info.get('auto-build'),
                                 auto_build=branch_info['auto-build'],
                                 auto_build_channels=branch_info.get(
-                                    'build-channels', False),
+                                    'build-channels', None),
                                 build_path=branch_info.get('build-path', None),
                                 store_channels=track_channels,
                                 store_upload=branch_info['upload']))
@@ -518,7 +553,7 @@ class CharmProject:
                 if detail['current_recipe']:
                     branch = (
                         detail['current_recipe']
-                            .git_ref.path[len('refs/heads/'):])
+                        .git_ref.path[len('refs/heads/'):])
                     channels = ', '.join(detail['current_recipe']
                                          .store_channels)
                     print(f"   - {name[:40]:40} - "
@@ -584,7 +619,7 @@ class CharmProject:
                         log_url = build.build_log_url
                         try:
                             error_detected = self._detect_error(log_url)
-                        except Exception as ex:
+                        except Exception:
                             logger.warn(f'Not able to detect error: {log_url}')
 
                     logger.debug((f'Adding {recipe.name}/{series_arch} to the '
@@ -598,12 +633,13 @@ class CharmProject:
                         'revision': build.revision_id,
                         'store_upload_revision': build.store_upload_revision,
                         'store_upload_status': build.store_upload_status,
-                        'store_upload_error_message': build.store_upload_error_message,
+                        'store_upload_error_message':
+                            build.store_upload_error_message,
                     }
         return builds
 
     @staticmethod
-    def _detect_error(url: str) -> str:
+    def _detect_error(url: str) -> List[str]:
         build_log = requests.get(url)
 
         errors_found = []
@@ -676,4 +712,4 @@ class CharmProject:
                 f"{'charmhub_name':>{width}}: {self.charmhub_name}\n"
                 f"{'launchpad_project':>{width}}: {self.launchpad_project}\n"
                 f"{'repository':>{width}}: {self.repository}\n"
-                + branches_str)
+                f"{branches_str}")
