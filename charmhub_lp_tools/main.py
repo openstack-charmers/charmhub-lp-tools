@@ -47,7 +47,10 @@ import yaml
 
 from datetime import datetime
 from typing import (Any, Dict, Iterator, List, Optional)
-from zoneinfo import ZoneInfo
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    from backports.zoneinfo import ZoneInfo
 
 import humanize
 

@@ -28,6 +28,10 @@ TypeLPObject = lazr.restfulclient.resource.Entry
 
 logger = logging.getLogger(__name__)
 
+try:
+    cache_fn = functools.cache
+except AttributeError:
+    cache_fn = functools.lru_cache(maxsize=None)
 
 def setup_logging(loglevel: str) -> None:
     """Sets up some basic logging."""
@@ -128,7 +132,7 @@ class LaunchpadTools:
         )
         return code_import.git_repository
 
-    @functools.cache
+    @cache_fn
     def _charm_recipes(self, owner: TypeLPObject):
         logger.debug('Getting fresh charm recipes from launchpad')
         recipes = []
