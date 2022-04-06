@@ -409,16 +409,18 @@ def check_builds_main(args: argparse.Namespace,
         if args.format == 'plain':
             table_builds_add_rows(t, builds, args.detect_error)
 
-    if args.format == 'plain':
-        print(t.get_string(sort_key=operator.itemgetter(0, 1, 2),
-                           sortby="Recipe Name"))
-    elif args.format == 'json':
-        print(json.dumps(builds, default=str))
-    else:
-        raise ValueError(f'Unknown output format: {args.format}')
+        if args.format == 'plain':
+            print(t.get_string(sort_key=operator.itemgetter(0, 1, 2),
+                               sortby="Recipe Name"))
+        elif args.format == 'json':
+            print(json.dumps(builds, default=str))
+        else:
+            raise ValueError(f'Unknown output format: {args.format}')
 
 
-def table_builds_add_rows(t, builds, detect_error):
+def table_builds_add_rows(t: PrettyTable,
+                          builds: Dict[str, Dict[str, Dict[str, Any]]],
+                          detect_error: Any):
     """Print builds in plain text format."""
 
     for recipe_name, arch_build in builds.items():

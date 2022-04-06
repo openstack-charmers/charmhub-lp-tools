@@ -619,7 +619,7 @@ class CharmProject:
                         log_url = build.build_log_url
                         try:
                             error_detected = self._detect_error(log_url)
-                        except Exception as ex:
+                        except Exception:
                             logger.warn(f'Not able to detect error: {log_url}')
 
                     logger.debug((f'Adding {recipe.name}/{series_arch} to the '
@@ -638,7 +638,7 @@ class CharmProject:
         return builds
 
     @staticmethod
-    def _detect_error(url: str) -> str:
+    def _detect_error(url: str) -> List[str]:
         build_log = requests.get(url)
 
         errors_found = []
