@@ -4,7 +4,7 @@
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 
-   # http://www.apache.org/licenses/LICENSE-2.0
+# http://www.apache.org/licenses/LICENSE-2.0
 
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,11 +14,20 @@
 
 import collections
 import logging
-from typing import (Any, Dict, List, Tuple, IO)
+import subprocess
+import tempfile
 import sys
+
+from contextlib import suppress
+from typing import (Any, Dict, List, Tuple, IO)
+
+import requests
 
 from .launchpadtools import LaunchpadTools, TypeLPObject
 
+
+BUILD_SUCCESSFUL = 'Successfully built'
+ERROR_PATTERNS = '(ERROR|ModuleNotFoundError)'
 
 logger = logging.getLogger(__name__)
 
@@ -357,7 +366,8 @@ class CharmProject:
                     no_recipe_branches.append(lp_branch.path)
                     continue
 
-                # Strip off refs/head/. And no / allowed, so we'll replace with _
+                # Strip off refs/head/. And no / allowed, so we'll replace
+                # with _
                 branch_name = (lp_branch.path[len('refs/heads/'):]
                                     .replace('/', '-'))
                 recipe_format = branch_info['recipe-name']
@@ -515,6 +525,101 @@ class CharmProject:
                           f"git branch: {branch[:20]:20} "
                           f"channels: {channels}",
                           file=file)
+
+    def get_builds(self,
+                   channel: str = None,
+                   arch_tag: str = None,
+                   detect_error: bool = False
+                   ) -> Dict[str, Dict[str, Dict[str, Any]]]:
+        """Get the builds associated to a charm.
+
+        The builds are organized in a dictionary where the key is the recipe's
+        name that holds another dictionary that uses the <series>/<arch>
+        string as the key and its value is a dictionary with the relevant
+        attributes.
+
+        Example:
+
+        {'charm-nova-compute.master.latest': {
+            'focal/amd64': {
+                'datebuild': <datetime.datetime instance>,
+                'store_channels': ['latest/edge'],
+                'buildstate': 'Successfully built',
+                'build_log_url': 'https://launchpadlibrarian.net/58295/...',
+                'error_detected': <list of errors found in the log>
+                }
+            }
+        }
+
+        :param channel: filter list of builds by channel (e.g. 'latest/edge')
+        :param arch_tag: filter list of build by architecture (e.g. 'amd64')
+        :param detect_error: Attempt to found errors in the building log when
+                             the built was not successful.
+        """
+        lp_recipes = self.lpt.get_charm_recipes(self.lp_team, self.lp_project)
+        builds = collections.defaultdict(dict)
+        for recipe in lp_recipes:
+
+            if channel and channel not in recipe.store_channels:
+                logger.debug((f'Skipping recipe {recipe.name}, because '
+                              f'"{channel}" not in {recipe.store_channels}'))
+                continue
+
+            logger.debug(f'Getting builds for recipe {recipe.name}')
+            for build in recipe.builds:
+                build_arch_tag = build.distro_arch_series.architecture_tag
+                if arch_tag and arch_tag != build_arch_tag:
+                    logger.debug((f'Skipping build of arch {build_arch_tag} '
+                                  f'of recipe {recipe.name}'))
+                    continue
+
+                series_arch = f'{build.distro_series.name}/{build_arch_tag}'
+                logger.info((f'Found build of {recipe.name} for {series_arch} '
+                             f'in {recipe.store_channels}'))
+                date = build.datebuilt
+                if (series_arch not in builds[recipe.name] or
+                        builds[recipe.name][series_arch]['datebuilt'] < date):
+                    error_detected = None
+                    if detect_error and build.buildstate != BUILD_SUCCESSFUL:
+                        log_url = build.build_log_url
+                        try:
+                            error_detected = self._detect_error(log_url)
+                        except Exception as ex:
+                            logger.warn(f'Not able to detect error: {log_url}')
+
+                    logger.debug((f'Adding {recipe.name}/{series_arch} to the '
+                                  f'list of builds'))
+                    builds[recipe.name][series_arch] = {
+                        'datebuilt': build.datebuilt,
+                        'store_channels': recipe.store_channels,
+                        'buildstate': build.buildstate,
+                        'build_log_url': build.build_log_url,
+                        'error_detected': error_detected,
+                        'revision': build.revision_id,
+                        'store_upload_revision': build.store_upload_revision,
+                        'store_upload_status': build.store_upload_status,
+                        'store_upload_error_message': build.store_upload_error_message,
+                    }
+        return builds
+
+    @staticmethod
+    def _detect_error(url: str) -> str:
+        build_log = requests.get(url)
+
+        errors_found = []
+
+        with tempfile.NamedTemporaryFile() as f:
+            f.write(build_log.content)
+            f.flush()
+
+            with suppress(subprocess.CalledProcessError):
+                errors_found.append(
+                    subprocess.check_output(['zgrep', '-P', ERROR_PATTERNS,
+                                             f.name],
+                                            universal_newlines=True)
+                )
+
+        return errors_found
 
     @staticmethod
     def _group_channels(channels: List[str],

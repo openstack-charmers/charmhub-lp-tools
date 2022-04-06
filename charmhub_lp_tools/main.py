@@ -4,7 +4,7 @@
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 
-   # http://www.apache.org/licenses/LICENSE-2.0
+# http://www.apache.org/licenses/LICENSE-2.0
 
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
@@ -37,12 +37,21 @@ import argparse
 import collections
 import collections.abc
 import logging
+import json
+import operator
 import os
 import pathlib
 import pprint
 import sys
-from typing import (Any, Dict, Iterator, List, Optional)
 import yaml
+
+from datetime import datetime
+from typing import (Any, Dict, Iterator, List, Optional)
+from zoneinfo import ZoneInfo
+
+import humanize
+
+from prettytable import PrettyTable
 
 from .launchpadtools import (
     LaunchpadTools,
@@ -55,6 +64,9 @@ from .charm_project import (
 
 
 logger = logging.getLogger(__name__)
+
+LOGGING_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
+NOW = datetime.now(tz=ZoneInfo("UTC"))
 
 
 def check_config_dir_exists(dir_: pathlib.Path) -> pathlib.Path:
@@ -218,6 +230,13 @@ def parse_args() -> argparse.Namespace:
                         help=('Choose a specific charm name from the '
                               'configured set. May be repeated for multiple '
                               'charms.'))
+    parser.add_argument('-f', '--format',
+                        dest='format',
+                        metavar='FORMAT',
+                        type=str,
+                        choices=['plain', 'json'],
+                        default='plain',
+                        help='Specify the output format')
 
     subparser = parser.add_subparsers(required=True, dest='cmd')
     show_command = subparser.add_parser(
@@ -261,6 +280,23 @@ def parse_args() -> argparse.Namespace:
         help=('Use this flag to indicate to only setup the git mirroring and'
               'not set-up the recipes.'))
     sync_command.set_defaults(func=sync_main)
+    # check-builds
+    check_builds_commands = subparser.add_parser(
+        'check-builds',
+        help='Check the state of the builds available at Launchpad')
+    check_builds_commands.add_argument(
+        '--arch',
+        dest='arch_tag',
+        help='Filter builds by architecture tag (e.g. arm64)')
+    check_builds_commands.add_argument(
+        '--detect-error',
+        dest='detect_error',
+        action='store_true',
+        help='Look for the ERROR in the build log.')
+    check_builds_commands.add_argument(
+        '--channel',
+        help='Filter the builds by channel (e.g. latest/edge)')
+    check_builds_commands.set_defaults(func=check_builds_main)
 
     args = parser.parse_args()
     return args
@@ -337,9 +373,78 @@ def sync_main(args: argparse.Namespace,
             charm_project.ensure_charm_recipes()
 
 
+def check_builds_main(args: argparse.Namespace,
+                      gc: GroupConfig,
+                      ) -> None:
+    """Check the state of the builds in Launchpad.
+
+    :param args: the arguments parsed from the command line.
+    :param gc: The GroupConfig; i.e. all the charms and their config.
+    """
+    t = PrettyTable()
+    cols = ['Recipe Name', 'Channels', 'Arch', 'State', 'Age', 'Revision',
+            'Store Rev', 'Build Log']
+    if args.detect_error:
+        cols.append('Error')
+
+    t.field_names = cols
+    t.align = 'l'  # align to the left.
+
+    for cp in gc.projects(select=args.charms):
+        builds = cp.get_builds(args.channel, args.arch_tag, args.detect_error)
+
+        if args.format == 'plain':
+            table_builds_add_rows(t, builds, args.detect_error)
+
+    if args.format == 'plain':
+        print(t.get_string(sort_key=operator.itemgetter(0, 1, 2),
+                           sortby="Recipe Name"))
+    elif args.format == 'json':
+        print(json.dumps(builds, default=str))
+    else:
+        raise ValueError(f'Unknown output format: {args.format}')
+
+
+def table_builds_add_rows(t, builds, detect_error):
+    """Print builds in plain text format."""
+
+    for recipe_name, arch_build in builds.items():
+        for arch_name, build in arch_build.items():
+            age = humanize.naturaltime(build['datebuilt'], when=NOW)
+            if build['buildstate'] != 'Successfully built':
+                build_log = build['build_log_url']
+            else:
+                build_log = ''
+
+            try:
+                # git commit hash short version
+                revision = build['revision'][:7]
+            except Exception as ex:
+                logger.debug((f'Cannot get git commit hash short version: '
+                              f'{build["revision"]}'))
+                revision = None
+            if build['store_upload_status'] == 'Uploaded':
+                store_rev = build['store_upload_revision']
+            else:
+                store_rev = build['store_upload_error_message']
+            row = [
+                recipe_name, ', '.join(build['store_channels']), arch_name,
+                build['buildstate'], age, revision,
+                store_rev,
+                build_log,
+            ]
+
+            if detect_error:
+                if build['error_detected']:
+                    row.append('\n'.join(build['error_detected']))
+                else:
+                    row.append('')
+            t.add_row(row)
+
+
 def setup_logging(loglevel: str) -> None:
     """Sets up some basic logging."""
-    logging.basicConfig()
+    logging.basicConfig(format=LOGGING_FORMAT)
     logger.setLevel(getattr(logging, loglevel, 'ERROR'))
     cp_setup_logging(loglevel)
     lpt_setup_logging(loglevel)
@@ -353,7 +458,7 @@ def main():
     config_dir = check_config_dir_exists(
         pathlib.Path(os.fspath(args.config_dir)).resolve())
     logger.info('Using config dir %s (full: %s)',
-        args.config_dir, config_dir)
+                args.config_dir, config_dir)
 
     # # Load the various project group configurations
     files = get_group_config_filenames(config_dir,

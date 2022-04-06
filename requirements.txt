@@ -2,3 +2,5 @@ ruamel.yaml
 theblues
 libcharmstore
 launchpadlib
+prettytable
+humanize
