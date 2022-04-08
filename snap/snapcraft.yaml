@@ -1,0 +1,42 @@
+name: charmhub-lp-tool
+base: core20
+version: git
+summary: Tools to configure and manage repositories and launchpad builders.
+description: |
+  This repository provides the `charmhub-lp-tool` command that provides the
+  ability to configure and manage the launchpad builders, repositories and
+  branches in repositories.
+
+  The commands are:
+
+    * show -> display the current config.
+    * list -> show a list of the charms configured in the supplied config.
+    * diff -> show the current config and a diff to what is asked for.
+    * config -> show the asked for config
+    * sync -> sync the asked for config to the charm in the form of recipes.
+
+  After installation of the snap connect the password-manager-service
+  interface to allow charmhub-lp-tool to store the Launchpad's access token in
+  the keyring.
+
+grade: stable
+confinement: strict
+
+apps:
+  charmhub-lp-tool:
+    command: bin/charmhub-lp-tool
+    plugs:
+      - network
+      - home
+      - password-manager-service  # to allow launchpadlib to store the token in the keyring.
+parts:
+  charmhub-lp-tool:
+    plugin: python
+    source: ./
+    requirements:
+      - ./requirements.txt
+    # stage-packages:
+    #   - python3-cryptography  # required by python3-secretstorage
+    #   - python3-gi  # required by python3-secretstorage
+    #   - python3-cairo  # required by python3-gi
+    #   - python3-secretstorage
