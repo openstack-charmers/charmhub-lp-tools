@@ -5,3 +5,4 @@ launchpadlib
 prettytable
 humanize
 backports.zoneinfo; python_version < '3.9'
+SecretStorage  # LP: #1923727
