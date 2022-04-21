@@ -453,9 +453,9 @@ class CharmProject:
                         track=track)
 
                     lp_recipe = charm_lp_recipe_map.pop(recipe_name, None)
-                    # filter_by is a list of branches, but lp_branch.path includes
-                    # the "refs/heads/" part, so we actually need a more complex
-                    # filter below
+                    # filter_by is a list of branches, but lp_branch.path
+                    # includes the "refs/heads/" part, so we actually need a
+                    # more complex filter below
                     if filter_by:
                         _branch = lp_branch.path
                         if _branch.startswith("refs/heads/"):
