@@ -31,6 +31,7 @@ from .launchpadtools import LaunchpadTools, TypeLPObject
 
 BUILD_SUCCESSFUL = 'Successfully built'
 ERROR_PATTERNS = '(ERROR|ModuleNotFoundError)'
+DEFAULT_RECIPE_FORMAT = '{project}.{branch}.{track}'
 
 logger = logging.getLogger(__name__)
 
@@ -285,7 +286,9 @@ class CharmProject:
                 f'and project {lp_project.name}')
         return lp_repo
 
-    def ensure_charm_recipes(self, branches: Optional[List[str]] = None,
+    def ensure_charm_recipes(self,
+                             branches: Optional[List[str]] = None,
+                             remove_unknown: bool = False,
                              ) -> None:
         """Ensure charm recipes in Launchpad matches CharmProject's conf.
 
@@ -317,9 +320,9 @@ class CharmProject:
                 "but are configured as branches for recipes.")
             for branch in current['missing_branches_in_repo']:
                 print(f" - {branch}")
-        any_changes = (all(not(r['exists']) or r['changed']
+        any_changes = (any(not(r['exists']) or r['changed']
                            for r in current['in_config_recipes'].values()))
-        if not(any_changes):
+        if not(any_changes) and not(current['non_config_recipes']):
             print("No changes needed.")
             return
 
@@ -341,7 +344,6 @@ class CharmProject:
                 build_from = state['build_from']
                 lp_recipe = self.lpt.create_charm_recipe(
                     recipe_name=recipe_name,
-                    # branch_info=branch_info,
                     branch_info=build_from['branch_info'],
                     lp_branch=build_from['lp_branch'],
                     owner=self.lp_team,
@@ -353,13 +355,51 @@ class CharmProject:
             else:
                 print(f'No changes needed for charm recipe {recipe_name}')
 
-        # TODO (wolsen) Check to see if there are any remaining charm recipes
-        #  configured in Launchpad and remove them (?). Remaining charm recipes
-        #  will be those left in the charm_lp_recipe_map dict. Not doing this
-        #  currently as its not clear that we want to remove them automatically
-        #  (yet).
+        # If remove_unknown option is used, then delete the unknown recipes.
+        if remove_unknown and current['non_config_recipes']:
+            for recipe_name in current['non_config_recipes'].keys():
+                self.lpt.delete_charm_recipe_by_name(
+                    recipe_name,
+                    self.lp_team,
+                    self.lp_project)
 
-    def _calc_recipes_for_repo(self, filter_by: Optional[List[str]] = None,
+    def delete_recipe_by_name(self,
+                              recipe_name: str,
+                              ) -> None:
+        """Delete a recipe filtered by it's full name.
+
+        :param recipe_name: the recipe name
+        :raises KeyError: if the recipe couldn't be found.
+        """
+        self.lpt.delete_charm_recipe_by_name(
+            recipe_name,
+            self.lp_team,
+            self.lp_project)
+
+    def delete_recipe_by_branch_and_track(self,
+                                          branch: str,
+                                          track: str,
+                                          ) -> None:
+        """Delete a recipe filtered by track and risk.
+
+        If the recipe doesn't exist a warning is printed.
+
+        :param branch: the branch to delete
+        :param track: the track to delete.
+        :raises KeyError: if the recipe couldn't be found.
+        """
+        branch_name = branch.replace('/', '-')
+        recipe_name = DEFAULT_RECIPE_FORMAT.format(
+            project=self.lp_project.name,
+            branch=branch_name,
+            track=track)
+        self.lpt.delete_charm_recipe_by_name(
+            recipe_name,
+            self.lp_team,
+            self.lp_project)
+
+    def _calc_recipes_for_repo(self,
+                               filter_by: Optional[List[str]] = None,
                                ) -> Dict:
         """Calculate the set of recipes for a repo based on the config.
 
@@ -384,15 +424,6 @@ class CharmProject:
         if self.lp_repo:
             for lp_branch in self.lp_repo.branches:
                 mentioned_branches.append(lp_branch.path)
-                # filter_by is a list of branches, but lp_branch.path includes
-                # the "refs/heads/" part, so we actually need a more complex
-                # filter below
-                if filter_by:
-                    _branch = lp_branch.path
-                    if _branch.startswith("refs/heads/"):
-                        _branch = _branch[len("refs/heads/"):]
-                    if _branch not in filter_by:
-                        continue
                 branch_info = self.branches.get(lp_branch.path, None)
                 if not branch_info:
                     logger.info(
@@ -422,6 +453,15 @@ class CharmProject:
                         track=track)
 
                     lp_recipe = charm_lp_recipe_map.pop(recipe_name, None)
+                    # filter_by is a list of branches, but lp_branch.path includes
+                    # the "refs/heads/" part, so we actually need a more complex
+                    # filter below
+                    if filter_by:
+                        _branch = lp_branch.path
+                        if _branch.startswith("refs/heads/"):
+                            _branch = _branch[len("refs/heads/"):]
+                        if _branch not in filter_by:
+                            continue
                     if lp_recipe:
                         # calculate diff
                         changed, updated_dict, changes = (
@@ -491,7 +531,7 @@ class CharmProject:
             print(f"{self.name[:35]:35} -- No repo configured!", file=file)
             return
         info = self._calc_recipes_for_repo()
-        any_changes = (all(not(r['exists']) or r['changed']
+        any_changes = (any(not(r['exists']) or r['changed']
                            for r in info['in_config_recipes'].values()))
         change_text = ("Changes required"
                        if any_changes or info['missing_branches_in_repo']
