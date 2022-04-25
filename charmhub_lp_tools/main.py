@@ -65,6 +65,8 @@ from .charm_project import (
     setup_logging as cp_setup_logging,
 )
 
+from .charmhub import setup_logging as ch_setup_logging
+
 
 logger = logging.getLogger(__name__)
 
@@ -311,6 +313,34 @@ def parse_args() -> argparse.Namespace:
         '--channel',
         help='Filter the builds by channel (e.g. latest/edge)')
     check_builds_commands.set_defaults(func=check_builds_main)
+    # authorize helper
+    authorize_command = subparser.add_parser(
+        'authorize',
+        help=("Authorize helper to authorize the launchpad recipes to upload "
+              "to the charmhub.  Each recipe needs authorization, and this "
+              "helper will use the filter's used to select the project "
+              "group, charms, ignored charms, branch to select the charm "
+              "recipes that need authorizing.  You will need to log in as "
+              "the user that can authorize the charm uploads to charmhub. "
+              "This is a different user account than launchpad."))
+    authorize_command.add_argument(
+        '-b', '--git-branch',
+        dest="git_branches",
+        action='append',
+        metavar='GIT_BRANCH',
+        type=str,
+        help=('Git branch name to authorize recipes for.  Can be used '
+              'multiple times.  If not included, then all branches for the '
+              'charm will be authorized.  If a charm doesn\'t have the branch '
+              'then it will be ignored.'))
+    authorize_command.add_argument(
+        '--force',
+        dest='force',
+        action='store_true',
+        help=('Force an authorization even if Launchpad holds authorization '
+              'for the recipe. This can be used to force a new authorization, '
+              'or to change which account is authorizing the recipe.'))
+    authorize_command.set_defaults(func=authorize_main)
 
     args = parser.parse_args()
     return args
@@ -458,12 +488,28 @@ def table_builds_add_rows(t: PrettyTable,
             t.add_row(row)
 
 
+def authorize_main(args: argparse.Namespace,
+                   gc: GroupConfig,
+                   ) -> None:
+    """Authorize a set of recipes to be uploaded to charmhub.
+
+    This needs to be done on a machine where a browser can be launched to
+    perform the login (to get the macaroon) for charmhub.
+
+    :param args: the arguments parsed from the command line.
+    :para gc: The GroupConfig; i.e. all the charms and their config.
+    """
+    for cp in gc.projects(select=args.charms):
+        cp.authorize(args.git_branches, args.force)
+
+
 def setup_logging(loglevel: str) -> None:
     """Sets up some basic logging."""
     logging.basicConfig(format=LOGGING_FORMAT)
     logger.setLevel(getattr(logging, loglevel, 'ERROR'))
     cp_setup_logging(loglevel)
     lpt_setup_logging(loglevel)
+    ch_setup_logging(loglevel)
 
 
 def main():
