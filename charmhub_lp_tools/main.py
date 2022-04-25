@@ -364,7 +364,7 @@ def parse_args(config_from_file: FileConfig) -> argparse.Namespace:
               "pushes to the latest/stable track.  Note it does not remove "
               "the revision from the charmhub.  This is purely managing the "
               "recipes in launchpad."))
-    group = delete_command.add_mutually_exclusive_group(required=True)
+    group = delete_command.add_mutually_exclusive_group(required=False)
     track_branch_group = group.add_argument_group()
     track_branch_group.add_argument(
         '--track', '-t',
