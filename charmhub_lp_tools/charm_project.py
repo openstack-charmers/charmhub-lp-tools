@@ -675,8 +675,8 @@ class CharmProject:
         print(f"Authorizing recipes for {self.charmhub_name} ({self.name})")
         if branches:
             print(" .. for branch{}: {}".format(
-                      ('' if len(branches) == 1 else 'es'),
-                      ', '.join(branches)))
+                ('' if len(branches) == 1 else 'es'),
+                ', '.join(branches)))
         info = self._calc_recipes_for_repo()
         for recipe_name, in_config_recipe in info['in_config_recipes'].items():
             branch_path = (
@@ -717,7 +717,6 @@ class CharmProject:
             logger.error(
                 "Failed authenticating for upload.  Recipe: %s "
                 "Reason: %s", recipe.name, str(e))
-
 
     @staticmethod
     def _group_channels(channels: List[str],

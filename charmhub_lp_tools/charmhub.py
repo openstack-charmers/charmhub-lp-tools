@@ -57,6 +57,6 @@ def authorize_from_macaroon_dict(auth_data: Dict) -> str:
     if len(discharges) != 1:
         raise ValueError(
             "Expected one discharge macaroon, got: %s", len(discharges))
-    result =  discharges[0].macaroon.serialize(JsonSerializer())
+    result = discharges[0].macaroon.serialize(JsonSerializer())
     logger.debug("Result is:\n%s", pprint.pformat(result))
     return result
