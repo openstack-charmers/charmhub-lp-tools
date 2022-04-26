@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import collections
+import json
 import logging
 import subprocess
 import tempfile
@@ -27,6 +28,7 @@ from contextlib import suppress
 import requests
 
 from .launchpadtools import LaunchpadTools, TypeLPObject
+from .charmhub import authorize_from_macaroon_dict
 
 
 BUILD_SUCCESSFUL = 'Successfully built'
@@ -727,6 +729,65 @@ class CharmProject:
                 )
 
         return errors_found
+
+    def authorize(self, branches: List[str], force: bool = False) -> None:
+        """Authorize a charm's recipes, filtered by branches.
+
+        Authorize a charm's recipes.  The list of recipes to authorize is
+        filtered by the branch provided.  If the branch doesn't exist, then a
+        warning is logged, but no error is raised.
+
+        NOTE: currently, the authorization is done via web-browser.
+
+        :param branches: a list of branches to match to find the recipes.
+        :param force: if True, do authorization even if LP thinks it is already
+            authorized.
+        """
+        print(f"Authorizing recipes for {self.charmhub_name} ({self.name})")
+        if branches:
+            print(" .. for branch{}: {}".format(
+                ('' if len(branches) == 1 else 'es'),
+                ', '.join(branches)))
+        info = self._calc_recipes_for_repo()
+        for recipe_name, in_config_recipe in info['in_config_recipes'].items():
+            branch_path = (
+                in_config_recipe['build_from']['lp_branch'].path or '')
+            if branch_path.startswith('refs/heads/'):
+                branch_path = branch_path[len('refs/heads/'):]
+            if branches and (branch_path not in branches):
+                logger.info("Ignoring branch: %s as not in branches match.",
+                            branch_path)
+                continue
+            print(f'Branch is: {branch_path}')
+            current_recipe = in_config_recipe['current_recipe']
+            if current_recipe is not None:
+                if not(current_recipe.can_upload_to_store) or force:
+                    print(f"Doing authorization for recipe: {recipe_name} on "
+                          f"branch: {branch_path} for charm: "
+                          f"{self.charmhub_name}")
+                    self._do_authorization(current_recipe)
+                else:
+                    print(f"Recipe: {recipe_name} is already authorized.")
+            else:
+                print(f"Recipe: {recipe_name} does not exist in Launchpad "
+                      f"for charm: {self.charmhub_name}")
+
+    def _do_authorization(self, recipe: TypeLPObject) -> None:
+        """Do the authorization for a recipe.
+
+        :param recipe: a LP object that is for the recipe to auth.
+        """
+        try:
+            macaroon_dict = json.loads(recipe.beginAuthorization())
+            result = authorize_from_macaroon_dict(macaroon_dict)
+            recipe.completeAuthorization(discharge_macaroon=result)
+        # blanket catch.  This is part of serveral attempts, so we don't want
+        # to stop trying just because one fails.  If all fail, it'll be pretty
+        # obvious!
+        except Exception as e:
+            logger.error(
+                "Failed authenticating for upload.  Recipe: %s "
+                "Reason: %s", recipe.name, str(e))
 
     @staticmethod
     def _group_channels(channels: List[str],
