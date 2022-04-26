@@ -196,7 +196,9 @@ class CharmProject:
             self.lp_team, self.lp_project)
         return self._lp_repo
 
-    def ensure_git_repository(self) -> TypeLPObject:
+    def ensure_git_repository(self,
+                              dry_run: bool = True
+                              ) -> Optional[TypeLPObject]:
         """Ensure that launchpad project git repository exists.
 
         Configures launchpad project repositories for self (the charm)
@@ -220,6 +222,10 @@ class CharmProject:
                         '%s does not exist, importing now from %s',
                         self.lp_project.name, self.lp_team.name,
                         self.repository)
+            if dry_run:
+                print("Git repository doesn't exist, but dry_run, bailing "
+                      "early.")
+                return
             self._lp_repo = self.lpt.import_repository(
                 self.lp_team, self.lp_project, self.repository)
             self.lp_repo.lp_refresh()
@@ -233,6 +239,10 @@ class CharmProject:
         if not self.lp_repo.target_default:
             logger.info('Setting default repository for %s to %s',
                         self.lp_project.name, self.lp_repo.git_https_url)
+            if dry_run:
+                print("Git target repostiroy isn't set, but dry_run, bailing "
+                      "early.")
+                return
             try:
                 self.lpt.set_default_repository(self.lp_project, self.lp_repo)
                 self.lp_repo.lp_refresh()
@@ -246,6 +256,9 @@ class CharmProject:
 
         if not self.lp_project.vcs:
             logger.info('Setting project %s vcs to Git', self.lp_project.name)
+            if dry_run:
+                print("LP project is not set, but dry_run, bailing early.")
+                return
             self._lp_project = None  # force a refetch of the project
             self.lp_project.vcs = 'Git'
             attempts = 0
@@ -289,6 +302,7 @@ class CharmProject:
     def ensure_charm_recipes(self,
                              branches: Optional[List[str]] = None,
                              remove_unknown: bool = False,
+                             dry_run: bool = True,
                              ) -> None:
         """Ensure charm recipes in Launchpad matches CharmProject's conf.
 
@@ -336,21 +350,27 @@ class CharmProject:
                 lp_recipe = state['current_recipe']
                 print(f'Charm recipe {lp_recipe.name} has changes. Saving.')
                 print("Changes: {}".format(", ".join(state['changes'])))
-                for rpart, battr in state['updated_parts'].items():
-                    setattr(lp_recipe, rpart, battr)
-                lp_recipe.lp_save()
+                if dry_run:
+                    print("Would update but dry_run")
+                else:
+                    for rpart, battr in state['updated_parts'].items():
+                        setattr(lp_recipe, rpart, battr)
+                    lp_recipe.lp_save()
             elif not(state['exists']):
-                print(f'Creating charm recipe for {recipe_name}')
-                build_from = state['build_from']
-                lp_recipe = self.lpt.create_charm_recipe(
-                    recipe_name=recipe_name,
-                    branch_info=build_from['branch_info'],
-                    lp_branch=build_from['lp_branch'],
-                    owner=self.lp_team,
-                    project=self.lp_project,
-                    store_name=self.charmhub_name,
-                    channels=build_from['channels'])
-                print(f'Created charm recipe {lp_recipe.name}')
+                if dry_run:
+                    print(f'Would create recipe {recipe_name} (dry_run)')
+                else:
+                    print(f'Creating charm recipe for {recipe_name}')
+                    build_from = state['build_from']
+                    lp_recipe = self.lpt.create_charm_recipe(
+                        recipe_name=recipe_name,
+                        branch_info=build_from['branch_info'],
+                        lp_branch=build_from['lp_branch'],
+                        owner=self.lp_team,
+                        project=self.lp_project,
+                        store_name=self.charmhub_name,
+                        channels=build_from['channels'])
+                    print(f'Created charm recipe {lp_recipe.name}')
 
             else:
                 print(f'No changes needed for charm recipe {recipe_name}')
@@ -358,27 +378,35 @@ class CharmProject:
         # If remove_unknown option is used, then delete the unknown recipes.
         if remove_unknown and current['non_config_recipes']:
             for recipe_name in current['non_config_recipes'].keys():
-                self.lpt.delete_charm_recipe_by_name(
-                    recipe_name,
-                    self.lp_team,
-                    self.lp_project)
+                if dry_run:
+                    print(f'Would delete {recipe_name} (dry_run)')
+                else:
+                    self.lpt.delete_charm_recipe_by_name(
+                        recipe_name,
+                        self.lp_team,
+                        self.lp_project)
 
     def delete_recipe_by_name(self,
                               recipe_name: str,
+                              dry_run: bool = True,
                               ) -> None:
         """Delete a recipe filtered by it's full name.
 
         :param recipe_name: the recipe name
         :raises KeyError: if the recipe couldn't be found.
         """
-        self.lpt.delete_charm_recipe_by_name(
-            recipe_name,
-            self.lp_team,
-            self.lp_project)
+        if dry_run:
+            print(f'Would delete {recipe_name} (dry_run)')
+        else:
+            self.lpt.delete_charm_recipe_by_name(
+                recipe_name,
+                self.lp_team,
+                self.lp_project)
 
     def delete_recipe_by_branch_and_track(self,
                                           branch: str,
                                           track: str,
+                                          dry_run: bool = True,
                                           ) -> None:
         """Delete a recipe filtered by track and risk.
 
@@ -393,10 +421,13 @@ class CharmProject:
             project=self.lp_project.name,
             branch=branch_name,
             track=track)
-        self.lpt.delete_charm_recipe_by_name(
-            recipe_name,
-            self.lp_team,
-            self.lp_project)
+        if dry_run:
+            print(f'Would delete {recipe_name} (dry_run)')
+        else:
+            self.lpt.delete_charm_recipe_by_name(
+                recipe_name,
+                self.lp_team,
+                self.lp_project)
 
     def _calc_recipes_for_repo(self,
                                filter_by: Optional[List[str]] = None,

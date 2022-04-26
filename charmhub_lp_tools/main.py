@@ -468,16 +468,17 @@ def sync_main(args: argparse.Namespace,
     :para gc: The GroupConfig; i.e. all the charms and their config.
     """
     if not args.confirmed:
-        raise AssertionError(
-            "'sync' command issued, but --i-really-mean-it flag not used. "
-            "Abandoning.")
+        print("--i-really-mean-it flag not used so this is dry run only.")
     if args.git_mirror_only:
         logger.info("Only ensuring mirroring of git repositories.")
     for charm_project in gc.projects(select=args.charms):
-        charm_project.ensure_git_repository()
+        charm_project.ensure_git_repository(dry_run=not(args.confirmed))
         if not(args.git_mirror_only):
             charm_project.ensure_charm_recipes(
-                args.git_branches, remove_unknown=args.remove_unknown_recipes)
+                args.git_branches,
+                remove_unknown=args.remove_unknown_recipes,
+                dry_run=not(args.confirmed))
+        print()
 
 def delete_main(args: argparse.Namespace,
                 gc: GroupConfig,
@@ -492,9 +493,7 @@ def delete_main(args: argparse.Namespace,
     :para gc: The GroupConfig; i.e. all the charms and their config.
     """
     if not args.confirmed:
-        raise AssertionError(
-            "'delete' command issued, but --i-really-mean-it flag not used. "
-            "Abandoning.")
+        print("--i-really-mean-it flag not used so this is dry run only.")
     if not args.recipe_name:
         if not(args.track) and not(args.branch):
             raise AssertionError(
@@ -504,11 +503,13 @@ def delete_main(args: argparse.Namespace,
         try:
             if args.recipe_name:
                 charm_project.delete_recipe_by_name(
-                    recipe_name=args.recipe_name)
+                    recipe_name=args.recipe_name,
+                    dry_run=not(args.confirmed))
             else:
                 charm_project.delete_recipe_by_branch_and_track(
                     track=args.track,
-                    branch=args.branch)
+                    branch=args.branch,
+                    dry_run=not(args.confirmed))
         except KeyError as e:
             logger.warning("Delete failed as recipe not found: charm: %s "
                            " reason: %s", charm_project.name, str(e))
@@ -519,6 +520,7 @@ def delete_main(args: argparse.Namespace,
                            charm_project.charmhub_name, str(e))
             if not args.ignore_errors:
                 raise
+        print()
 
 
 def check_builds_main(args: argparse.Namespace,
