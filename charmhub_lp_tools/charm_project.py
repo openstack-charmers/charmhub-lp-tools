@@ -686,7 +686,8 @@ class CharmProject:
                              f'in {recipe.store_channels}'))
                 date = build.datebuilt
                 if (series_arch not in builds[recipe.name] or
-                        builds[recipe.name][series_arch]['datebuilt'] < date):
+                        (date and
+                        builds[recipe.name][series_arch]['datebuilt'] < date)):
                     error_detected = None
                     if detect_error and build.buildstate != BUILD_SUCCESSFUL:
                         log_url = build.build_log_url
