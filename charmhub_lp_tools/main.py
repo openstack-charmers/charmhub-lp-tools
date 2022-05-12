@@ -115,9 +115,9 @@ def get_file_config() -> FileConfig:
         log_level = None
     log_level = log_level or None
     return FileConfig(
-        config_dir = config_items.get('config_dir'),
-        log_level = log_level,
-        ignore_errors = bool(config_items.get('ignore_errors', False)))
+        config_dir=config_items.get('config_dir'),
+        log_level=log_level,
+        ignore_errors=bool(config_items.get('ignore_errors', False)))
 
 
 def check_config_dir_exists(dir_: pathlib.Path) -> pathlib.Path:
@@ -509,6 +509,7 @@ def sync_main(args: argparse.Namespace,
                 remove_unknown=args.remove_unknown_recipes,
                 dry_run=not(args.confirmed))
         print()
+
 
 def delete_main(args: argparse.Namespace,
                 gc: GroupConfig,
