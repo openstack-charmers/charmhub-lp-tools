@@ -208,6 +208,10 @@ class CharmProject:
         configured in launchpad to import the git tree from the upstream
         project repository and that the git repository is set as the default
         code repository for the launchpad project.
+
+        :param dry_run: if True, the default, then the function will just check
+            if the git repository is being mirrored and bail if it isn't.
+        :returns: the launchpad repository object
         """
         logger.info('Checking Launchpad git repositories for %s.',
                     self.name)
@@ -225,8 +229,9 @@ class CharmProject:
                         self.lp_project.name, self.lp_team.name,
                         self.repository)
             if dry_run:
-                print("Git repository doesn't exist, but dry_run, bailing "
-                      "early.")
+                print("Git repository doesn't exist, but dry_run is set, so "
+                      "not setting up git repository mirroring and bailing "
+                      "out.")
                 return
             self._lp_repo = self.lpt.import_repository(
                 self.lp_team, self.lp_project, self.repository)
@@ -310,6 +315,9 @@ class CharmProject:
 
         :param branches: If supplied, then filter the recipes based on the
             branches supplied.
+        :param remove_unknown: If True then unknown recipes will be removed.
+        :param dry_run: If True then actions are not actually undertaken, but
+            are printed to the console instead.
         """
         print(f'Checking charm recipes for charm {self.name}')
         logger.debug(str(self))
@@ -381,7 +389,9 @@ class CharmProject:
         if remove_unknown and current['non_config_recipes']:
             for recipe_name in current['non_config_recipes'].keys():
                 if dry_run:
-                    print(f'Would delete {recipe_name} (dry_run)')
+                    print(
+                        f'Would delete {self.lp_project.name} - {recipe_name}'
+                        f' (dry_run)')
                 else:
                     self.lpt.delete_charm_recipe_by_name(
                         recipe_name,
@@ -398,7 +408,8 @@ class CharmProject:
         :raises KeyError: if the recipe couldn't be found.
         """
         if dry_run:
-            print(f'Would delete {recipe_name} (dry_run)')
+            print(f'Would delete {self.lp_project.name} - {recipe_name} '
+                  f'(dry_run)')
         else:
             self.lpt.delete_charm_recipe_by_name(
                 recipe_name,
@@ -465,6 +476,18 @@ class CharmProject:
                     no_recipe_branches.append(lp_branch.path)
                     continue
 
+                # Variable to cache whether filtering is happening
+                are_filtering = False
+                # filter_by is a list of branches, but lp_branch.path
+                # includes the "refs/heads/" part, so we actually need a
+                # more complex filter below
+                if filter_by:
+                    _branch = lp_branch.path
+                    if _branch.startswith("refs/heads/"):
+                        _branch = _branch[len("refs/heads/"):]
+                    if _branch not in filter_by:
+                        are_filtering = True
+
                 # Strip off refs/head/. And no / allowed, so we'll replace
                 # with _
                 branch_name = (lp_branch.path[len('refs/heads/'):]
@@ -485,16 +508,14 @@ class CharmProject:
                         branch=branch_name,
                         track=track)
 
+                    # Popping recipes needs to happen before filtering so that
+                    # they are not 'unknown' recipes and don't get deleted.
                     lp_recipe = charm_lp_recipe_map.pop(recipe_name, None)
-                    # filter_by is a list of branches, but lp_branch.path
-                    # includes the "refs/heads/" part, so we actually need a
-                    # more complex filter below
-                    if filter_by:
-                        _branch = lp_branch.path
-                        if _branch.startswith("refs/heads/"):
-                            _branch = _branch[len("refs/heads/"):]
-                        if _branch not in filter_by:
-                            continue
+
+                    # Now if fitlering just continue
+                    if are_filtering:
+                        continue
+
                     if lp_recipe:
                         # calculate diff
                         changed, updated_dict, changes = (
@@ -687,7 +708,8 @@ class CharmProject:
                 date = build.datebuilt
                 if (series_arch not in builds[recipe.name] or
                         (date and
-                        builds[recipe.name][series_arch]['datebuilt'] < date)):
+                         builds[recipe.name][series_arch]['datebuilt'] < date
+                         )):
                     error_detected = None
                     if detect_error and build.buildstate != BUILD_SUCCESSFUL:
                         log_url = build.build_log_url
