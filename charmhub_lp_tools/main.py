@@ -25,12 +25,21 @@ The commands are:
    config -> show the asked for config
    sync -> sync the asked for config to the charm in the form of recipes.
 
-Note that 'update' requires the --i-really-mean-this flag as it is potentially
-destructive.  'update' also has other flags.
+Note that 'sync' requires the --i-really-mean-this flag as it is potentially
+destructive.  'sync' also has other flags.
 
 As always, use the -h|--help on the command to discover what the options are
 and how to manage it.
 
+Note: the script will attempt to read a config file at
+$XDG_CONFIG_HOME/charmhub_lp_tools/charmhub_lp_tools.conf.  If $XDG_CONFIG_HOME
+is not set, the $HOME/.config/charmhub_lp_tools/charmhub_lp_tools.conf will be
+looked for.  If either of these files exist then the following keys are read
+from them:
+
+config_dir = the directory that the config.yaml files are held.
+log_level  = (ERROR, DEBUG, WARNING, INFO, or unset)
+ignore_errors = true|false (false is the default)
 """
 
 import argparse
@@ -46,7 +55,7 @@ import sys
 import yaml
 
 from datetime import datetime
-from typing import (Any, Dict, Iterator, List, Optional)
+from typing import (Any, Dict, Iterator, List, Optional, NamedTuple)
 try:
     from zoneinfo import ZoneInfo
 except ImportError:
@@ -65,11 +74,50 @@ from .charm_project import (
     setup_logging as cp_setup_logging,
 )
 
+from .charmhub import setup_logging as ch_setup_logging
+
 
 logger = logging.getLogger(__name__)
 
 LOGGING_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
 NOW = datetime.now(tz=ZoneInfo("UTC"))
+
+
+class FileConfig(NamedTuple):
+    config_dir: Optional[str] = None
+    log_level: Optional[str] = None
+    ignore_errors: bool = False
+
+
+def _read_config_file() -> Dict[str, Any]:
+    """Read the config file, if it exists, and return any set items."""
+    if os.environ.get('XDG_CONFIG_HOME'):
+        root = pathlib.Path(os.environ['XDG_CONFIG_HOME'])
+    elif os.environ.get('HOME'):
+        root = pathlib.Path(os.environ['HOME'])
+    else:
+        return {}
+    config_file = root / '.config' / 'charmhub_lp_tools' / 'config.yaml'
+    if config_file.is_file():
+        try:
+            with config_file.open() as f:
+                return yaml.safe_load(f)
+        except Exception as e:
+            logger.error("Couldn't read %s: %s", str(config_file), str(e))
+    return {}
+
+
+def get_file_config() -> FileConfig:
+    """Return default config, if any, from a config file location."""
+    config_items = _read_config_file()
+    log_level = str(config_items.get('log_level', '')).upper()
+    if log_level not in ('', 'ERROR', 'DEBUG', 'WARNING', 'INFO'):
+        log_level = None
+    log_level = log_level or None
+    return FileConfig(
+        config_dir=config_items.get('config_dir'),
+        log_level=log_level,
+        ignore_errors=bool(config_items.get('ignore_errors', False)))
 
 
 def check_config_dir_exists(dir_: pathlib.Path) -> pathlib.Path:
@@ -194,26 +242,28 @@ class GroupConfig:
                 yield project
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(config_from_file: FileConfig) -> argparse.Namespace:
     """Parse the arguments and return the parsed args.
 
     Work out what command is being run and collect the arguments
     associated with it.
 
-    :param pargs: the sys.argv set.
+    :param config_from_file: the arguments from the config_file, if any
     :returns: parsed arguments
     """
     parser = argparse.ArgumentParser(
         description='Configure launchpad projects for charms'
     )
-    default_config_dir = os.getcwd()
+    default_config_dir = config_from_file.config_dir or os.getcwd()
+    default_log_level = config_from_file.log_level or 'ERROR'
+    default_ignore_errors = config_from_file.ignore_errors
     parser.add_argument('--config-dir',
                         type=str, default=default_config_dir,
                         help=('directory containing configuration files. '
                               'The default is the current working directory.'))
     parser.add_argument('--log', dest='loglevel',
                         type=str.upper,
-                        default='ERROR',
+                        default=default_log_level,
                         choices=('DEBUG', 'INFO', 'WARN', 'ERROR', 'CRITICAL'),
                         help='Loglevel')
     parser.add_argument('-p', '--group',
@@ -241,6 +291,11 @@ def parse_args() -> argparse.Namespace:
                         choices=['plain', 'json'],
                         default='plain',
                         help='Specify the output format')
+    parser.add_argument('-i', '--ignore-errors',
+                        dest='ignore_errors',
+                        default=default_ignore_errors,
+                        action='store_true',
+                        help='Ignore errors and try to carry on.')
 
     subparser = parser.add_subparsers(required=True, dest='cmd')
     show_command = subparser.add_parser(
@@ -277,6 +332,15 @@ def parse_args() -> argparse.Namespace:
         help=('This flag must be supplied to indicate that the sync/apply '
               'command really should be used.'))
     sync_command.add_argument(
+        '--remove-unknown',
+        dest='remove_unknown_recipes',
+        action='store_true',
+        default=False,
+        help=('If set, this flag indicates that any recipes that are not in '
+              'the config for a charm will be deleted. This is so that '
+              'recipes can be renamed and moved about and not leave behind '
+              'recipes that both try to write to the target track.'))
+    sync_command.add_argument(
         '--git-mirror-only',
         dest='git_mirror_only',
         action='store_true',
@@ -294,6 +358,36 @@ def parse_args() -> argparse.Namespace:
               'will be synced.  If a charm doesn\'t have the branch then '
               'it will be ignored.'))
     sync_command.set_defaults(func=sync_main)
+    # Delete recipes
+    delete_command = subparser.add_parser(
+        'delete',
+        help=("Delete a recipe from launchpad based on a track/risk. e.g. "
+              "use --track latest --risk edge to remove the recipe that "
+              "pushes to the latest/stable track.  Note it does not remove "
+              "the revision from the charmhub.  This is purely managing the "
+              "recipes in launchpad."))
+    group = delete_command.add_mutually_exclusive_group(required=False)
+    track_branch_group = group.add_argument_group()
+    track_branch_group.add_argument(
+        '--track', '-t',
+        dest='track',
+        help=('The track to target. e.g. latest'))
+    track_branch_group.add_argument(
+        '--git-branch', '-b',
+        dest='branch',
+        help=('The branch to target. e.g. stable/xena'))
+    group.add_argument(
+        '--name',
+        dest='recipe_name',
+        help=('Name the recipe fully that you want to delete.'))
+    delete_command.add_argument(
+        '--i-really-mean-it',
+        dest='confirmed',
+        action='store_true',
+        default=False,
+        help=('This flag must be supplied to indicate that the delete recipe '
+              'command really should be used.'))
+    delete_command.set_defaults(func=delete_main)
     # check-builds
     check_builds_commands = subparser.add_parser(
         'check-builds',
@@ -311,6 +405,34 @@ def parse_args() -> argparse.Namespace:
         '--channel',
         help='Filter the builds by channel (e.g. latest/edge)')
     check_builds_commands.set_defaults(func=check_builds_main)
+    # authorize helper
+    authorize_command = subparser.add_parser(
+        'authorize',
+        help=("Authorize helper to authorize the launchpad recipes to upload "
+              "to the charmhub.  Each recipe needs authorization, and this "
+              "helper will use the filter's used to select the project "
+              "group, charms, ignored charms, branch to select the charm "
+              "recipes that need authorizing.  You will need to log in as "
+              "the user that can authorize the charm uploads to charmhub. "
+              "This is a different user account than launchpad."))
+    authorize_command.add_argument(
+        '-b', '--git-branch',
+        dest="git_branches",
+        action='append',
+        metavar='GIT_BRANCH',
+        type=str,
+        help=('Git branch name to authorize recipes for.  Can be used '
+              'multiple times.  If not included, then all branches for the '
+              'charm will be authorized.  If a charm doesn\'t have the branch '
+              'then it will be ignored.'))
+    authorize_command.add_argument(
+        '--force',
+        dest='force',
+        action='store_true',
+        help=('Force an authorization even if Launchpad holds authorization '
+              'for the recipe. This can be used to force a new authorization, '
+              'or to change which account is authorizing the recipe.'))
+    authorize_command.set_defaults(func=authorize_main)
 
     args = parser.parse_args()
     return args
@@ -376,15 +498,60 @@ def sync_main(args: argparse.Namespace,
     :para gc: The GroupConfig; i.e. all the charms and their config.
     """
     if not args.confirmed:
-        raise AssertionError(
-            "'sync' command issues, but --i-really-mean-it flag not used. "
-            "Abandoning.")
+        print("--i-really-mean-it flag not used so this is dry run only.")
     if args.git_mirror_only:
         logger.info("Only ensuring mirroring of git repositories.")
     for charm_project in gc.projects(select=args.charms):
-        charm_project.ensure_git_repository()
+        charm_project.ensure_git_repository(dry_run=not(args.confirmed))
         if not(args.git_mirror_only):
-            charm_project.ensure_charm_recipes(args.git_branches)
+            charm_project.ensure_charm_recipes(
+                args.git_branches,
+                remove_unknown=args.remove_unknown_recipes,
+                dry_run=not(args.confirmed))
+        print()
+
+
+def delete_main(args: argparse.Namespace,
+                gc: GroupConfig,
+                ) -> None:
+    """Delete a recipe determined by name of track/risk for charms selected.
+
+    This uses the GroupConfig and then deletes the recipe associated with the
+    track/risk, or just name, for that GroupConfig item if it exists.  If it
+    doesn't then a warning is logged.
+
+    :param args: the arguments parsed from the command line.
+    :para gc: The GroupConfig; i.e. all the charms and their config.
+    """
+    if not args.confirmed:
+        print("--i-really-mean-it flag not used so this is dry run only.")
+    if not args.recipe_name:
+        if not(args.track) and not(args.branch):
+            raise AssertionError(
+                "'delete' command: must supply either (track and branch) or "
+                "name parameters.  See --help for command.")
+    for charm_project in gc.projects(select=args.charms):
+        try:
+            if args.recipe_name:
+                charm_project.delete_recipe_by_name(
+                    recipe_name=args.recipe_name,
+                    dry_run=not(args.confirmed))
+            else:
+                charm_project.delete_recipe_by_branch_and_track(
+                    track=args.track,
+                    branch=args.branch,
+                    dry_run=not(args.confirmed))
+        except KeyError as e:
+            logger.warning("Delete failed as recipe not found: charm: %s "
+                           " reason: %s", charm_project.name, str(e))
+            if not args.ignore_errors:
+                raise
+        except Exception as e:
+            logger.warning("Error deleting recipe: charm: %s, reason: %s",
+                           charm_project.charmhub_name, str(e))
+            if not args.ignore_errors:
+                raise
+        print()
 
 
 def check_builds_main(args: argparse.Namespace,
@@ -405,18 +572,21 @@ def check_builds_main(args: argparse.Namespace,
     t.align = 'l'  # align to the left.
 
     for cp in gc.projects(select=args.charms):
+        if args.format == 'plain':
+            print(f"Looking at charm: {cp.charmhub_name}")
+
         builds = cp.get_builds(args.channel, args.arch_tag, args.detect_error)
 
         if args.format == 'plain':
             table_builds_add_rows(t, builds, args.detect_error)
 
-        if args.format == 'plain':
-            print(t.get_string(sort_key=operator.itemgetter(0, 1, 2),
-                               sortby="Recipe Name"))
         elif args.format == 'json':
             print(json.dumps(builds, default=str))
         else:
             raise ValueError(f'Unknown output format: {args.format}')
+    if args.format == 'plain':
+        print(t.get_string(sort_key=operator.itemgetter(0, 1, 2),
+                           sortby="Recipe Name"))
 
 
 def table_builds_add_rows(t: PrettyTable,
@@ -458,21 +628,38 @@ def table_builds_add_rows(t: PrettyTable,
             t.add_row(row)
 
 
+def authorize_main(args: argparse.Namespace,
+                   gc: GroupConfig,
+                   ) -> None:
+    """Authorize a set of recipes to be uploaded to charmhub.
+
+    This needs to be done on a machine where a browser can be launched to
+    perform the login (to get the macaroon) for charmhub.
+
+    :param args: the arguments parsed from the command line.
+    :para gc: The GroupConfig; i.e. all the charms and their config.
+    """
+    for cp in gc.projects(select=args.charms):
+        cp.authorize(args.git_branches, args.force)
+
+
 def setup_logging(loglevel: str) -> None:
     """Sets up some basic logging."""
     logging.basicConfig(format=LOGGING_FORMAT)
     logger.setLevel(getattr(logging, loglevel, 'ERROR'))
     cp_setup_logging(loglevel)
     lpt_setup_logging(loglevel)
+    ch_setup_logging(loglevel)
 
 
 def main():
     """Main entry point."""
-    args = parse_args()
+    config_from_file = get_file_config()
+    args = parse_args(config_from_file)
     setup_logging(args.loglevel)
 
     config_dir = check_config_dir_exists(
-        pathlib.Path(os.fspath(args.config_dir)).resolve())
+        pathlib.Path(args.config_dir).expanduser().resolve())
     logger.info('Using config dir %s (full: %s)',
                 args.config_dir, config_dir)
 

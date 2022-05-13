@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import collections
+import json
 import logging
 import subprocess
 import tempfile
@@ -27,10 +28,12 @@ from contextlib import suppress
 import requests
 
 from .launchpadtools import LaunchpadTools, TypeLPObject
+from .charmhub import authorize_from_macaroon_dict
 
 
 BUILD_SUCCESSFUL = 'Successfully built'
 ERROR_PATTERNS = '(ERROR|ModuleNotFoundError)'
+DEFAULT_RECIPE_FORMAT = '{project}.{branch}.{track}'
 
 logger = logging.getLogger(__name__)
 
@@ -195,7 +198,9 @@ class CharmProject:
             self.lp_team, self.lp_project)
         return self._lp_repo
 
-    def ensure_git_repository(self) -> TypeLPObject:
+    def ensure_git_repository(self,
+                              dry_run: bool = True
+                              ) -> Optional[TypeLPObject]:
         """Ensure that launchpad project git repository exists.
 
         Configures launchpad project repositories for self (the charm)
@@ -203,6 +208,10 @@ class CharmProject:
         configured in launchpad to import the git tree from the upstream
         project repository and that the git repository is set as the default
         code repository for the launchpad project.
+
+        :param dry_run: if True, the default, then the function will just check
+            if the git repository is being mirrored and bail if it isn't.
+        :returns: the launchpad repository object
         """
         logger.info('Checking Launchpad git repositories for %s.',
                     self.name)
@@ -219,6 +228,11 @@ class CharmProject:
                         '%s does not exist, importing now from %s',
                         self.lp_project.name, self.lp_team.name,
                         self.repository)
+            if dry_run:
+                print("Git repository doesn't exist, but dry_run is set, so "
+                      "not setting up git repository mirroring and bailing "
+                      "out.")
+                return
             self._lp_repo = self.lpt.import_repository(
                 self.lp_team, self.lp_project, self.repository)
             self.lp_repo.lp_refresh()
@@ -232,6 +246,10 @@ class CharmProject:
         if not self.lp_repo.target_default:
             logger.info('Setting default repository for %s to %s',
                         self.lp_project.name, self.lp_repo.git_https_url)
+            if dry_run:
+                print("Git target repostiroy isn't set, but dry_run, bailing "
+                      "early.")
+                return
             try:
                 self.lpt.set_default_repository(self.lp_project, self.lp_repo)
                 self.lp_repo.lp_refresh()
@@ -245,6 +263,9 @@ class CharmProject:
 
         if not self.lp_project.vcs:
             logger.info('Setting project %s vcs to Git', self.lp_project.name)
+            if dry_run:
+                print("LP project is not set, but dry_run, bailing early.")
+                return
             self._lp_project = None  # force a refetch of the project
             self.lp_project.vcs = 'Git'
             attempts = 0
@@ -285,12 +306,18 @@ class CharmProject:
                 f'and project {lp_project.name}')
         return lp_repo
 
-    def ensure_charm_recipes(self, branches: Optional[List[str]] = None,
+    def ensure_charm_recipes(self,
+                             branches: Optional[List[str]] = None,
+                             remove_unknown: bool = False,
+                             dry_run: bool = True,
                              ) -> None:
         """Ensure charm recipes in Launchpad matches CharmProject's conf.
 
         :param branches: If supplied, then filter the recipes based on the
             branches supplied.
+        :param remove_unknown: If True then unknown recipes will be removed.
+        :param dry_run: If True then actions are not actually undertaken, but
+            are printed to the console instead.
         """
         print(f'Checking charm recipes for charm {self.name}')
         logger.debug(str(self))
@@ -317,9 +344,9 @@ class CharmProject:
                 "but are configured as branches for recipes.")
             for branch in current['missing_branches_in_repo']:
                 print(f" - {branch}")
-        any_changes = (all(not(r['exists']) or r['changed']
+        any_changes = (any(not(r['exists']) or r['changed']
                            for r in current['in_config_recipes'].values()))
-        if not(any_changes):
+        if not(any_changes) and not(current['non_config_recipes']):
             print("No changes needed.")
             return
 
@@ -333,33 +360,90 @@ class CharmProject:
                 lp_recipe = state['current_recipe']
                 print(f'Charm recipe {lp_recipe.name} has changes. Saving.')
                 print("Changes: {}".format(", ".join(state['changes'])))
-                for rpart, battr in state['updated_parts'].items():
-                    setattr(lp_recipe, rpart, battr)
-                lp_recipe.lp_save()
+                if dry_run:
+                    print("Would update but dry_run")
+                else:
+                    for rpart, battr in state['updated_parts'].items():
+                        setattr(lp_recipe, rpart, battr)
+                    lp_recipe.lp_save()
             elif not(state['exists']):
-                print(f'Creating charm recipe for {recipe_name}')
-                build_from = state['build_from']
-                lp_recipe = self.lpt.create_charm_recipe(
-                    recipe_name=recipe_name,
-                    # branch_info=branch_info,
-                    branch_info=build_from['branch_info'],
-                    lp_branch=build_from['lp_branch'],
-                    owner=self.lp_team,
-                    project=self.lp_project,
-                    store_name=self.charmhub_name,
-                    channels=build_from['channels'])
-                print(f'Created charm recipe {lp_recipe.name}')
+                if dry_run:
+                    print(f'Would create recipe {recipe_name} (dry_run)')
+                else:
+                    print(f'Creating charm recipe for {recipe_name}')
+                    build_from = state['build_from']
+                    lp_recipe = self.lpt.create_charm_recipe(
+                        recipe_name=recipe_name,
+                        branch_info=build_from['branch_info'],
+                        lp_branch=build_from['lp_branch'],
+                        owner=self.lp_team,
+                        project=self.lp_project,
+                        store_name=self.charmhub_name,
+                        channels=build_from['channels'])
+                    print(f'Created charm recipe {lp_recipe.name}')
 
             else:
                 print(f'No changes needed for charm recipe {recipe_name}')
 
-        # TODO (wolsen) Check to see if there are any remaining charm recipes
-        #  configured in Launchpad and remove them (?). Remaining charm recipes
-        #  will be those left in the charm_lp_recipe_map dict. Not doing this
-        #  currently as its not clear that we want to remove them automatically
-        #  (yet).
+        # If remove_unknown option is used, then delete the unknown recipes.
+        if remove_unknown and current['non_config_recipes']:
+            for recipe_name in current['non_config_recipes'].keys():
+                if dry_run:
+                    print(
+                        f'Would delete {self.lp_project.name} - {recipe_name}'
+                        f' (dry_run)')
+                else:
+                    self.lpt.delete_charm_recipe_by_name(
+                        recipe_name,
+                        self.lp_team,
+                        self.lp_project)
 
-    def _calc_recipes_for_repo(self, filter_by: Optional[List[str]] = None,
+    def delete_recipe_by_name(self,
+                              recipe_name: str,
+                              dry_run: bool = True,
+                              ) -> None:
+        """Delete a recipe filtered by it's full name.
+
+        :param recipe_name: the recipe name
+        :raises KeyError: if the recipe couldn't be found.
+        """
+        if dry_run:
+            print(f'Would delete {self.lp_project.name} - {recipe_name} '
+                  f'(dry_run)')
+        else:
+            self.lpt.delete_charm_recipe_by_name(
+                recipe_name,
+                self.lp_team,
+                self.lp_project)
+
+    def delete_recipe_by_branch_and_track(self,
+                                          branch: str,
+                                          track: str,
+                                          dry_run: bool = True,
+                                          ) -> None:
+        """Delete a recipe filtered by track and risk.
+
+        If the recipe doesn't exist a warning is printed.
+
+        :param branch: the branch to delete
+        :param track: the track to delete.
+        :raises KeyError: if the recipe couldn't be found.
+        """
+        branch_name = branch.replace('/', '-')
+        recipe_name = DEFAULT_RECIPE_FORMAT.format(
+            project=self.lp_project.name,
+            branch=branch_name,
+            track=track)
+        if dry_run:
+            print(f'Would delete {recipe_name} (dry_run)')
+        else:
+            self.lpt.delete_charm_recipe_by_name(
+                recipe_name,
+                self.lp_team,
+                self.lp_project)
+
+    def _calc_recipes_for_repo(self,
+                               filter_by: Optional[List[str]] = None,
                                ) -> Dict:
         """Calculate the set of recipes for a repo based on the config.
 
@@ -384,15 +468,6 @@ class CharmProject:
         if self.lp_repo:
             for lp_branch in self.lp_repo.branches:
                 mentioned_branches.append(lp_branch.path)
-                # filter_by is a list of branches, but lp_branch.path includes
-                # the "refs/heads/" part, so we actually need a more complex
-                # filter below
-                if filter_by:
-                    _branch = lp_branch.path
-                    if _branch.startswith("refs/heads/"):
-                        _branch = _branch[len("refs/heads/"):]
-                    if _branch not in filter_by:
-                        continue
                 branch_info = self.branches.get(lp_branch.path, None)
                 if not branch_info:
                     logger.info(
@@ -400,6 +475,18 @@ class CharmProject:
                         lp_branch.path)
                     no_recipe_branches.append(lp_branch.path)
                     continue
+
+                # Variable to cache whether filtering is happening
+                are_filtering = False
+                # filter_by is a list of branches, but lp_branch.path
+                # includes the "refs/heads/" part, so we actually need a
+                # more complex filter below
+                if filter_by:
+                    _branch = lp_branch.path
+                    if _branch.startswith("refs/heads/"):
+                        _branch = _branch[len("refs/heads/"):]
+                    if _branch not in filter_by:
+                        are_filtering = True
 
                 # Strip off refs/head/. And no / allowed, so we'll replace
                 # with _
@@ -421,7 +508,14 @@ class CharmProject:
                         branch=branch_name,
                         track=track)
 
+                    # Popping recipes needs to happen before filtering so that
+                    # they are not 'unknown' recipes and don't get deleted.
                     lp_recipe = charm_lp_recipe_map.pop(recipe_name, None)
+
+                    # Now if fitlering just continue
+                    if are_filtering:
+                        continue
+
                     if lp_recipe:
                         # calculate diff
                         changed, updated_dict, changes = (
@@ -491,7 +585,7 @@ class CharmProject:
             print(f"{self.name[:35]:35} -- No repo configured!", file=file)
             return
         info = self._calc_recipes_for_repo()
-        any_changes = (all(not(r['exists']) or r['changed']
+        any_changes = (any(not(r['exists']) or r['changed']
                            for r in info['in_config_recipes'].values()))
         change_text = ("Changes required"
                        if any_changes or info['missing_branches_in_repo']
@@ -613,7 +707,9 @@ class CharmProject:
                              f'in {recipe.store_channels}'))
                 date = build.datebuilt
                 if (series_arch not in builds[recipe.name] or
-                        builds[recipe.name][series_arch]['datebuilt'] < date):
+                        (date and
+                         builds[recipe.name][series_arch]['datebuilt'] < date
+                         )):
                     error_detected = None
                     if detect_error and build.buildstate != BUILD_SUCCESSFUL:
                         log_url = build.build_log_url
@@ -656,6 +752,65 @@ class CharmProject:
                 )
 
         return errors_found
+
+    def authorize(self, branches: List[str], force: bool = False) -> None:
+        """Authorize a charm's recipes, filtered by branches.
+
+        Authorize a charm's recipes.  The list of recipes to authorize is
+        filtered by the branch provided.  If the branch doesn't exist, then a
+        warning is logged, but no error is raised.
+
+        NOTE: currently, the authorization is done via web-browser.
+
+        :param branches: a list of branches to match to find the recipes.
+        :param force: if True, do authorization even if LP thinks it is already
+            authorized.
+        """
+        print(f"Authorizing recipes for {self.charmhub_name} ({self.name})")
+        if branches:
+            print(" .. for branch{}: {}".format(
+                ('' if len(branches) == 1 else 'es'),
+                ', '.join(branches)))
+        info = self._calc_recipes_for_repo()
+        for recipe_name, in_config_recipe in info['in_config_recipes'].items():
+            branch_path = (
+                in_config_recipe['build_from']['lp_branch'].path or '')
+            if branch_path.startswith('refs/heads/'):
+                branch_path = branch_path[len('refs/heads/'):]
+            if branches and (branch_path not in branches):
+                logger.info("Ignoring branch: %s as not in branches match.",
+                            branch_path)
+                continue
+            print(f'Branch is: {branch_path}')
+            current_recipe = in_config_recipe['current_recipe']
+            if current_recipe is not None:
+                if not(current_recipe.can_upload_to_store) or force:
+                    print(f"Doing authorization for recipe: {recipe_name} on "
+                          f"branch: {branch_path} for charm: "
+                          f"{self.charmhub_name}")
+                    self._do_authorization(current_recipe)
+                else:
+                    print(f"Recipe: {recipe_name} is already authorized.")
+            else:
+                print(f"Recipe: {recipe_name} does not exist in Launchpad "
+                      f"for charm: {self.charmhub_name}")
+
+    def _do_authorization(self, recipe: TypeLPObject) -> None:
+        """Do the authorization for a recipe.
+
+        :param recipe: a LP object that is for the recipe to auth.
+        """
+        try:
+            macaroon_dict = json.loads(recipe.beginAuthorization())
+            result = authorize_from_macaroon_dict(macaroon_dict)
+            recipe.completeAuthorization(discharge_macaroon=result)
+        # blanket catch.  This is part of serveral attempts, so we don't want
+        # to stop trying just because one fails.  If all fail, it'll be pretty
+        # obvious!
+        except Exception as e:
+            logger.error(
+                "Failed authenticating for upload.  Recipe: %s "
+                "Reason: %s", recipe.name, str(e))
 
     @staticmethod
     def _group_channels(channels: List[str],

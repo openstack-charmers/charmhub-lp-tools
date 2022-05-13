@@ -286,3 +286,28 @@ class LaunchpadTools:
         self._charm_recipes.cache_clear()
 
         return self.lp.charm_recipes.new(**recipe_args)
+
+    def delete_charm_recipe_by_name(self,
+                                    recipe_name: str,
+                                    lp_owner: TypeLPObject,
+                                    lp_project: TypeLPObject,
+                                    ) -> None:
+        """Delete the charm recipe by name that it finds first.
+
+        :param recipe_name: the recipe name to delete.
+        :param owner: the owner of the recipe
+        :param project: the LP project that has the recipe
+        :raises: KeyError on failure to delete.
+        """
+        recipes = self.get_charm_recipes(lp_owner, lp_project)
+        # delete the recipe if found
+        for recipe in recipes:
+            if recipe.name == recipe_name:
+                recipe.lp_delete()
+                print(f"Deleted recipe: {recipe_name}")
+                self._charm_recipes.cache_clear()
+                break
+        else:
+            raise KeyError(
+                f"Recipe {recipe_name} not found for project "
+                f"{lp_project.name} (owner {lp_owner.name}")
