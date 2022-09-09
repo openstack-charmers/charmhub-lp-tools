@@ -434,6 +434,39 @@ def parse_args(config_from_file: FileConfig) -> argparse.Namespace:
               'or to change which account is authorizing the recipe.'))
     authorize_command.set_defaults(func=authorize_main)
 
+    # request-build helper
+    request_build_command = subparser.add_parser(
+        'request-build',
+        help=('Request the building of recipes on Launchpad, a check is made '
+              'on the client side to determine if a new build is really '
+              'needed, unless --force is passed')
+    )
+    request_build_command.add_argument(
+        '--force',
+        dest='force',
+        action='store_true',
+        help='Force requesting a new build.'
+    )
+    request_build_command.add_argument(
+        '-b', '--git-branch',
+        dest="git_branches",
+        action='append',
+        metavar='GIT_BRANCH',
+        type=str,
+        help=('Git branch name to filter the recipes that will be requested '
+              'to be built.  Can be used multiple times.  If not included, '
+              'then all branches for the charm will be attempted to be built. '
+              'If a charm doesn\'t have the branch then it will be ignored.')
+    )
+    request_build_command.add_argument(
+        '--i-really-mean-it',
+        dest='confirmed',
+        action='store_true',
+        default=False,
+        help=('This flag must be supplied to indicate that the request-build '
+              'should really submit the requests to Launchpad.')
+    )
+    request_build_command.set_defaults(func=request_build)
     args = parser.parse_args()
     return args
 
@@ -641,6 +674,19 @@ def authorize_main(args: argparse.Namespace,
     """
     for cp in gc.projects(select=args.charms):
         cp.authorize(args.git_branches, args.force)
+
+
+def request_build(args: argparse.Namespace,
+                  gc: GroupConfig,
+                  ) -> None:
+    """Request a build on Launchpad.
+
+    :param args: the arguments parsed from the command line.
+    :para gc: The GroupConfig; i.e. all the charms and their config.
+    """
+    for cp in gc.projects(select=args.charms):
+        cp.request_build_by_branch(args.git_branches, args.force,
+                                   dry_run=not args.confirmed)
 
 
 def setup_logging(loglevel: str) -> None:
