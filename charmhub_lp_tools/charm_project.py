@@ -351,9 +351,9 @@ class CharmProject:
                 "but are configured as branches for recipes.")
             for branch in current['missing_branches_in_repo']:
                 print(f" - {branch}")
-        any_changes = (any(not(r['exists']) or r['changed']
+        any_changes = (any(not (r['exists']) or r['changed']
                            for r in current['in_config_recipes'].values()))
-        if not(any_changes) and not(current['non_config_recipes']):
+        if not (any_changes) and not (current['non_config_recipes']):
             print("No changes needed.")
             return
 
@@ -373,7 +373,7 @@ class CharmProject:
                     for rpart, battr in state['updated_parts'].items():
                         setattr(lp_recipe, rpart, battr)
                     lp_recipe.lp_save()
-            elif not(state['exists']):
+            elif not (state['exists']):
                 if dry_run:
                     print(f'Would create recipe {recipe_name} (dry_run)')
                 else:
@@ -592,7 +592,7 @@ class CharmProject:
             print(f"{self.name[:35]:35} -- No repo configured!", file=file)
             return
         info = self._calc_recipes_for_repo()
-        any_changes = (any(not(r['exists']) or r['changed']
+        any_changes = (any(not (r['exists']) or r['changed']
                            for r in info['in_config_recipes'].values()))
         change_text = ("Changes required"
                        if any_changes or info['missing_branches_in_repo']
@@ -613,7 +613,7 @@ class CharmProject:
             if any_changes:
                 print(" * recipes that require changes:", file=file)
                 for recipe_name, detail_ in info['in_config_recipes'].items():
-                    if not(detail_['exists']):
+                    if not (detail_['exists']):
                         print(f"    - {recipe_name:35} : Needs creating.",
                               file=file)
                     elif detail_['changed']:
@@ -791,7 +791,7 @@ class CharmProject:
             print(f'Branch is: {branch_path}')
             current_recipe = in_config_recipe['current_recipe']
             if current_recipe is not None:
-                if not(current_recipe.can_upload_to_store) or force:
+                if not (current_recipe.can_upload_to_store) or force:
                     print(f"Doing authorization for recipe: {recipe_name} on "
                           f"branch: {branch_path} for charm: "
                           f"{self.charmhub_name}")
