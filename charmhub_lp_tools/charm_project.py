@@ -843,7 +843,10 @@ class CharmProject:
 
         return builds
 
-    def request_build_by_recipe(self, recipe, force, dry_run) -> object:
+    def request_build_by_recipe(self,
+                                recipe: TypeLPObject,
+                                force: bool,
+                                dry_run: bool) -> Optional[TypeLPObject]:
         """Request a build for the recipe.
 
         :param recipe: recipe to request the build for.
@@ -876,7 +879,7 @@ class CharmProject:
 
         return build
 
-    def is_build_valid(self, build) -> bool:
+    def is_build_valid(self, build: TypeLPObject) -> bool:
         """Determine if the build is valid.
 
         A valid build a build that meets the following criteria:
@@ -886,6 +889,9 @@ class CharmProject:
           building)
         - the build state is in any of: 'Failed to build', 'Failed to upload'.
         - the associated recipe is stale.
+
+        :param build: build to check if it is valid.
+        :returns: True if the last build is valid.
         """
         logger.debug(('Recipe can_upload_to_store %s , '
                       'store_upload_revision %s, build state %s, is stale %s'),
