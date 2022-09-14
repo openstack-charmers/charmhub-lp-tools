@@ -31,7 +31,14 @@ from .launchpadtools import LaunchpadTools, TypeLPObject
 from .charmhub import authorize_from_macaroon_dict
 
 
+# build states
 BUILD_SUCCESSFUL = 'Successfully built'
+CURRENTLY_BUILDING = 'Currently building'
+UPLOADING_BUILD = 'Uploading build'
+NEEDS_BUILDING = 'Needs building'
+FAILED_TO_BUILD = 'Failed to build'
+FAILED_TO_UPLOAD = 'Failed to upload'
+
 ERROR_PATTERNS = '(ERROR|ModuleNotFoundError)'
 DEFAULT_RECIPE_FORMAT = '{project}.{branch}.{track}'
 
@@ -344,9 +351,9 @@ class CharmProject:
                 "but are configured as branches for recipes.")
             for branch in current['missing_branches_in_repo']:
                 print(f" - {branch}")
-        any_changes = (any(not(r['exists']) or r['changed']
+        any_changes = (any(not (r['exists']) or r['changed']
                            for r in current['in_config_recipes'].values()))
-        if not(any_changes) and not(current['non_config_recipes']):
+        if not (any_changes) and not (current['non_config_recipes']):
             print("No changes needed.")
             return
 
@@ -366,7 +373,7 @@ class CharmProject:
                     for rpart, battr in state['updated_parts'].items():
                         setattr(lp_recipe, rpart, battr)
                     lp_recipe.lp_save()
-            elif not(state['exists']):
+            elif not (state['exists']):
                 if dry_run:
                     print(f'Would create recipe {recipe_name} (dry_run)')
                 else:
@@ -585,7 +592,7 @@ class CharmProject:
             print(f"{self.name[:35]:35} -- No repo configured!", file=file)
             return
         info = self._calc_recipes_for_repo()
-        any_changes = (any(not(r['exists']) or r['changed']
+        any_changes = (any(not (r['exists']) or r['changed']
                            for r in info['in_config_recipes'].values()))
         change_text = ("Changes required"
                        if any_changes or info['missing_branches_in_repo']
@@ -606,7 +613,7 @@ class CharmProject:
             if any_changes:
                 print(" * recipes that require changes:", file=file)
                 for recipe_name, detail_ in info['in_config_recipes'].items():
-                    if not(detail_['exists']):
+                    if not (detail_['exists']):
                         print(f"    - {recipe_name:35} : Needs creating.",
                               file=file)
                     elif detail_['changed']:
@@ -784,7 +791,7 @@ class CharmProject:
             print(f'Branch is: {branch_path}')
             current_recipe = in_config_recipe['current_recipe']
             if current_recipe is not None:
-                if not(current_recipe.can_upload_to_store) or force:
+                if not (current_recipe.can_upload_to_store) or force:
                     print(f"Doing authorization for recipe: {recipe_name} on "
                           f"branch: {branch_path} for charm: "
                           f"{self.charmhub_name}")
@@ -811,6 +818,114 @@ class CharmProject:
             logger.error(
                 "Failed authenticating for upload.  Recipe: %s "
                 "Reason: %s", recipe.name, str(e))
+
+    def request_build_by_branch(self,
+                                branches: List[str],
+                                force: bool = False,
+                                dry_run: bool = False) -> List[object]:
+        """Request a build for the recipe(s) associated to the git branch(es).
+
+        :param branches: a list of branches to match to find the recipes.
+        :param force: if True, the build is requested even if there is a valid
+                      build.
+        :param dry_run: if True, the request for building is logged, but not
+                        submitted to Launchpad.
+        :returns: list of builds
+        """
+        builds = []
+        for recipe in self._find_recipes(branches):
+
+            build = self.request_build_by_recipe(recipe, force, dry_run)
+            if build:
+                builds.append(build)
+                print(f'{self.charmhub_name}: New build requested '
+                      f'{build.web_link}')
+
+        return builds
+
+    def request_build_by_recipe(self,
+                                recipe: TypeLPObject,
+                                force: bool,
+                                dry_run: bool) -> Optional[TypeLPObject]:
+        """Request a build for the recipe.
+
+        :param recipe: recipe to request the build for.
+        :param force: if True, no checks are made to detect if the build is
+                      needed.
+        :returns: the build object or None when no build was requested.
+        """
+        build = None
+        do_build = False
+        if force:
+            logger.debug('Forcing build of recipe %s', recipe)
+            do_build = True
+        elif not self.is_build_valid(recipe.builds[0]):
+            logger.debug('Build %s is no valid, so request new build',
+                         recipe.builds[0])
+            do_build = True
+
+        if do_build:
+            if dry_run:
+                print(f'{self.charmhub_name}: New build needed (dry-run)')
+            else:
+                # the recipe build channels need to be passed when requesting
+                # the build, otherwise the build is made without the overrides
+                # that the recipe has defined.
+                build = recipe.requestBuilds(
+                    channels=recipe.auto_build_channels
+                )
+        else:
+            logger.debug('Not required to build: %s', recipe)
+
+        return build
+
+    def is_build_valid(self, build: TypeLPObject) -> bool:
+        """Determine if the build is valid.
+
+        A valid build a build that meets the following criteria:
+        - it's associated recipe has the attribute can_upload_to_store set to
+          True, but the build has no store_upload_revision set, and the build
+          is not in progress (states: currently build, uploading build or needs
+          building)
+        - the build state is in any of: 'Failed to build', 'Failed to upload'.
+        - the associated recipe is stale.
+
+        :param build: build to check if it is valid.
+        :returns: True if the last build is valid.
+        """
+        logger.debug(('Recipe can_upload_to_store %s , '
+                      'store_upload_revision %s, build state %s, is stale %s'),
+                     build.recipe.can_upload_to_store,
+                     build.store_upload_revision,
+                     build.buildstate, build.recipe.is_stale)
+        if (build.recipe.can_upload_to_store and
+                not build.store_upload_revision and
+                build.buildstate not in [CURRENTLY_BUILDING,
+                                         UPLOADING_BUILD,
+                                         NEEDS_BUILDING]):
+            return False
+        elif build.buildstate in [FAILED_TO_BUILD, FAILED_TO_UPLOAD]:
+            return False
+        elif build.recipe.is_stale:
+            return False
+
+        return True
+
+    def _find_recipes(self, branches):
+        info = self._calc_recipes_for_repo()
+        for recipe_name, in_config_recipe in info['in_config_recipes'].items():
+            branch_path = (
+                in_config_recipe['build_from']['lp_branch'].path or '')
+            if branch_path.startswith('refs/heads/'):
+                branch_path = branch_path[len('refs/heads/'):]
+            if branches and (branch_path not in branches):
+                logger.info("Ignoring branch: %s as not in branches match.",
+                            branch_path)
+                continue
+            current_recipe = in_config_recipe['current_recipe']
+            if current_recipe is not None:
+                logger.debug('Found recipe: %s', current_recipe.web_link)
+                yield current_recipe
 
     @staticmethod
     def _group_channels(channels: List[str],

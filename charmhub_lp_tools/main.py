@@ -159,7 +159,7 @@ def get_group_config_filenames(config_dir: pathlib.Path,
                  for group in project_group_names]
         # validate that the files actually exist
         for file in files:
-            if not(file.exists()):
+            if not (file.exists()):
                 raise FileNotFoundError(
                     f"The group config file '{file}' wasn't found")
     return files
@@ -195,7 +195,7 @@ class GroupConfig:
 
         :param files: the list of files to load config from.
         """
-        assert not(isinstance(files, str)), "param files must not be str"
+        assert not (isinstance(files, str)), "param files must not be str"
         assert isinstance(files, collections.abc.Sequence), \
             "Must pass a list or tuple."
         for file in files:
@@ -233,7 +233,7 @@ class GroupConfig:
     def projects(self, select: Optional[List[str]] = None,
                  ) -> Iterator[CharmProject]:
         """Generator returns a list of projects."""
-        if not(select):
+        if not (select):
             select = None
         for project in self.charm_projects.values():
             if (select is None or
@@ -434,6 +434,39 @@ def parse_args(config_from_file: FileConfig) -> argparse.Namespace:
               'or to change which account is authorizing the recipe.'))
     authorize_command.set_defaults(func=authorize_main)
 
+    # request-build helper
+    request_build_command = subparser.add_parser(
+        'request-build',
+        help=('Request the building of recipes on Launchpad, a check is made '
+              'on the client side to determine if a new build is really '
+              'needed, unless --force is passed')
+    )
+    request_build_command.add_argument(
+        '--force',
+        dest='force',
+        action='store_true',
+        help='Force requesting a new build.'
+    )
+    request_build_command.add_argument(
+        '-b', '--git-branch',
+        dest="git_branches",
+        action='append',
+        metavar='GIT_BRANCH',
+        type=str,
+        help=('Git branch name to filter the recipes that will be requested '
+              'to be built.  Can be used multiple times.  If not included, '
+              'then all branches for the charm will be attempted to be built. '
+              'If a charm doesn\'t have the branch then it will be ignored.')
+    )
+    request_build_command.add_argument(
+        '--i-really-mean-it',
+        dest='confirmed',
+        action='store_true',
+        default=False,
+        help=('This flag must be supplied to indicate that the request-build '
+              'should really submit the requests to Launchpad.')
+    )
+    request_build_command.set_defaults(func=request_build)
     args = parser.parse_args()
     return args
 
@@ -502,12 +535,12 @@ def sync_main(args: argparse.Namespace,
     if args.git_mirror_only:
         logger.info("Only ensuring mirroring of git repositories.")
     for charm_project in gc.projects(select=args.charms):
-        charm_project.ensure_git_repository(dry_run=not(args.confirmed))
-        if not(args.git_mirror_only):
+        charm_project.ensure_git_repository(dry_run=not (args.confirmed))
+        if not (args.git_mirror_only):
             charm_project.ensure_charm_recipes(
                 args.git_branches,
                 remove_unknown=args.remove_unknown_recipes,
-                dry_run=not(args.confirmed))
+                dry_run=not (args.confirmed))
         print()
 
 
@@ -526,7 +559,7 @@ def delete_main(args: argparse.Namespace,
     if not args.confirmed:
         print("--i-really-mean-it flag not used so this is dry run only.")
     if not args.recipe_name:
-        if not(args.track) and not(args.branch):
+        if not (args.track) and not (args.branch):
             raise AssertionError(
                 "'delete' command: must supply either (track and branch) or "
                 "name parameters.  See --help for command.")
@@ -535,12 +568,12 @@ def delete_main(args: argparse.Namespace,
             if args.recipe_name:
                 charm_project.delete_recipe_by_name(
                     recipe_name=args.recipe_name,
-                    dry_run=not(args.confirmed))
+                    dry_run=not (args.confirmed))
             else:
                 charm_project.delete_recipe_by_branch_and_track(
                     track=args.track,
                     branch=args.branch,
-                    dry_run=not(args.confirmed))
+                    dry_run=not (args.confirmed))
         except KeyError as e:
             logger.warning("Delete failed as recipe not found: charm: %s "
                            " reason: %s", charm_project.name, str(e))
@@ -641,6 +674,19 @@ def authorize_main(args: argparse.Namespace,
     """
     for cp in gc.projects(select=args.charms):
         cp.authorize(args.git_branches, args.force)
+
+
+def request_build(args: argparse.Namespace,
+                  gc: GroupConfig,
+                  ) -> None:
+    """Request a build on Launchpad.
+
+    :param args: the arguments parsed from the command line.
+    :para gc: The GroupConfig; i.e. all the charms and their config.
+    """
+    for cp in gc.projects(select=args.charms):
+        cp.request_build_by_branch(args.git_branches, args.force,
+                                   dry_run=not args.confirmed)
 
 
 def setup_logging(loglevel: str) -> None:
