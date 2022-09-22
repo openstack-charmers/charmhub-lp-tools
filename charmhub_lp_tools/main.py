@@ -310,7 +310,7 @@ def parse_args(config_from_file: FileConfig) -> argparse.Namespace:
     diff_command = subparser.add_parser(
         'diff',
         help=('Diff the declared config with the actual config in launchpad. '
-              'This shows the config and high-lights missing or extra '
+              'This shows the config and highlights missing or extra '
               'configuration that is in launchpad. Note that git repositories '
               'can have extra branches and these are not seen in the diff. '
               'Missing branches that are in the config are highlighted.'))
@@ -391,7 +391,7 @@ def parse_args(config_from_file: FileConfig) -> argparse.Namespace:
     # check-builds
     check_builds_commands = subparser.add_parser(
         'check-builds',
-        help='Check the state of the builds available at Launchpad')
+        help='Check the state of the builds available at Launchpad.')
     check_builds_commands.add_argument(
         '--arch',
         dest='arch_tag',
@@ -410,11 +410,11 @@ def parse_args(config_from_file: FileConfig) -> argparse.Namespace:
         'authorize',
         help=("Authorize helper to authorize the launchpad recipes to upload "
               "to the charmhub.  Each recipe needs authorization, and this "
-              "helper will use the filter's used to select the project "
-              "group, charms, ignored charms, branch to select the charm "
-              "recipes that need authorizing.  You will need to log in as "
-              "the user that can authorize the charm uploads to charmhub. "
-              "This is a different user account than launchpad."))
+              "helper will use the same filters used to select the project "
+              "group, charms, ignored charms, and branch to select the charm "
+              "recipes that need authorizing. The Charmhub user that can "
+              "upload charms will need to be logged in. This is a different "
+              "user account than Launchpad."))
     authorize_command.add_argument(
         '-b', '--git-branch',
         dest="git_branches",
@@ -439,7 +439,7 @@ def parse_args(config_from_file: FileConfig) -> argparse.Namespace:
         'request-build',
         help=('Request the building of recipes on Launchpad, a check is made '
               'on the client side to determine if a new build is really '
-              'needed, unless --force is passed')
+              'needed, unless --force is passed.')
     )
     request_build_command.add_argument(
         '--force',
