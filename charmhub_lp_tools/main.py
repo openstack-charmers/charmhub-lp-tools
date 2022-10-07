@@ -467,6 +467,21 @@ def parse_args(config_from_file: FileConfig) -> argparse.Namespace:
               'should really submit the requests to Launchpad.')
     )
     request_build_command.set_defaults(func=request_build)
+    # request-code-import helper
+    request_code_import_command = subparser.add_parser(
+        'request-code-import',
+        help='Request a new code import on Launchpad'
+    )
+    request_code_import_command.add_argument(
+        '--i-really-mean-it',
+        dest='confirmed',
+        action='store_true',
+        default=False,
+        help=('This flag must be supplied to indicate that the operation '
+              'should really submit the requests to Launchpad.')
+    )
+    request_code_import_command.set_defaults(func=request_code_import)
+
     args = parser.parse_args()
     return args
 
@@ -687,6 +702,19 @@ def request_build(args: argparse.Namespace,
     for cp in gc.projects(select=args.charms):
         cp.request_build_by_branch(args.git_branches, args.force,
                                    dry_run=not args.confirmed)
+
+
+def request_code_import(args: argparse.Namespace,
+                        gc: GroupConfig,
+                        ) -> None:
+    """Request a code import on Launchpad.
+
+    :param args: the arguments parsed from the command line.
+    :para gc: The GroupConfig; i.e. all the charms and their config.
+    """
+    for cp in gc.projects(select=args.charms):
+        cp.request_code_import(dry_run=not args.confirmed)
+        print(f'Requested import of {cp}')
 
 
 def setup_logging(loglevel: str) -> None:

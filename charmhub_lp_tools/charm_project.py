@@ -852,6 +852,8 @@ class CharmProject:
         :param recipe: recipe to request the build for.
         :param force: if True, no checks are made to detect if the build is
                       needed.
+        :param dry_run: if True, the request for building is printed, but not
+                        submitted to Launchpad.
         :returns: the build object or None when no build was requested.
         """
         build = None
@@ -910,6 +912,19 @@ class CharmProject:
             return False
 
         return True
+
+    def request_code_import(self,
+                            dry_run: bool):
+        """Request a new code import on Launchpad.
+
+        :param dry_run: if True, the request for building is printed, but not
+                        submitted to Launchpad.
+        """
+        if dry_run:
+            print(f'Requesting new code import {self.lp_repo} (dry-run)')
+            return
+
+        self.lp_repo.code_import.requestImport()
 
     def _find_recipes(self, branches):
         info = self._calc_recipes_for_repo()
