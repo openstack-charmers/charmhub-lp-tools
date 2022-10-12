@@ -70,6 +70,7 @@ from .launchpadtools import (
     setup_logging as lpt_setup_logging,
 )
 from .charm_project import (
+    CharmChannel,
     CharmProject,
     setup_logging as cp_setup_logging,
 )
@@ -481,6 +482,49 @@ def parse_args(config_from_file: FileConfig) -> argparse.Namespace:
               'should really submit the requests to Launchpad.')
     )
     request_code_import_command.set_defaults(func=request_code_import)
+    # copy-channel
+    copy_channel_command = subparser.add_parser(
+        'copy-channel',
+        help=('Copy all the charms available in a channel (track/risk) to '
+              'another channel'),
+    )
+    copy_channel_command.add_argument(
+        '--i-really-mean-it',
+        dest='confirmed',
+        action='store_true',
+        default=False,
+        help=('This flag must be supplied to indicate that the operation '
+              'should really commit the changes.')
+    )
+    copy_channel_command.add_argument(
+        '-s', '--source', dest='src_channel',
+        metavar='CHANNEL', required=True,
+        help='Source channel to copy charms from.'
+    )
+    copy_channel_command.add_argument(
+        '-d', '--destination', dest='dst_channel',
+        metavar='CHANNEL', required=True,
+        help='Destination channel to copy charms to.'
+    )
+    copy_channel_command.add_argument(
+        '--close-channel-before',
+        dest='close_dst_channel_before',
+        action='store_true',
+        default=False,
+        help=('Close the destination channel before copying the new charms '
+              'to it.'),
+    )
+    copy_channel_command.add_argument(
+        '--base',
+        dest='bases',
+        action='append',
+        metavar='BASE',
+        required=True,
+        type=str,
+        help=('Select charm(s) that run on the base (e.g. 20.04, 22.04). '
+              'Can be used multiple times.')
+    )
+    copy_channel_command.set_defaults(func=copy_channel)
 
     args = parser.parse_args()
     return args
@@ -715,6 +759,26 @@ def request_code_import(args: argparse.Namespace,
     for cp in gc.projects(select=args.charms):
         cp.request_code_import(dry_run=not args.confirmed)
         print(f'Requested import of {cp}')
+
+
+def copy_channel(args: argparse.Namespace,
+                 gc: GroupConfig,
+                 ) -> None:
+    """Copy the charms released from a channel to another one.
+
+    :param args: the arguments parsed from the command line.
+    :para gc: The GroupConfig; i.e. all the charms and their config.
+    """
+    for cp in gc.projects(select=args.charms):
+        src_channel = CharmChannel(cp, args.src_channel)
+        dst_channel = CharmChannel(cp, args.dst_channel)
+
+        if args.close_dst_channel_before:
+            dst_channel.close(dry_run=not args.confirmed)
+
+        for base in args.bases:
+            cp.copy_channel(src_channel, dst_channel,
+                            base=base, dry_run=not args.confirmed)
 
 
 def setup_logging(loglevel: str) -> None:

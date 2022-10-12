@@ -35,8 +35,5 @@ parts:
     source: ./
     requirements:
       - ./requirements.txt
-    # stage-packages:
-    #   - python3-cryptography  # required by python3-secretstorage
-    #   - python3-gi  # required by python3-secretstorage
-    #   - python3-cairo  # required by python3-gi
-    #   - python3-secretstorage
+    stage-snaps:
+      - charmcraft/2.x/stable

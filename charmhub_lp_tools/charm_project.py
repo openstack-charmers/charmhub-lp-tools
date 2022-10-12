@@ -17,7 +17,7 @@ import json
 import logging
 import subprocess
 import tempfile
-from typing import (Any, Dict, List, Tuple, IO, Optional)
+from typing import (Any, Dict, List, Tuple, IO, Optional, Set)
 import sys
 import time
 
@@ -42,12 +42,124 @@ FAILED_TO_UPLOAD = 'Failed to upload'
 ERROR_PATTERNS = '(ERROR|ModuleNotFoundError)'
 DEFAULT_RECIPE_FORMAT = '{project}.{branch}.{track}'
 
+CHARMHUB_BASE = "https://api.charmhub.io/v2/charms"
+
 logger = logging.getLogger(__name__)
 
 
 def setup_logging(loglevel: str) -> None:
     """Sets up some basic logging."""
     logger.setLevel(getattr(logging, loglevel, 'ERROR'))
+
+
+class CharmChannel:
+
+    INFO_URL = CHARMHUB_BASE + "/info/{charm}?fields=channel-map"
+
+    def __init__(self, project: 'CharmProject', name: str):
+        self.name = name
+        (self.track, self.risk) = self.name.split('/')
+        self.project = project
+        self._raw_charm_info = None
+        self.log = logging.getLogger(f'{__name__}.{self.__class__.__name__}')
+
+    def __str__(self):
+        return self.name
+
+    def __repr__(self):
+        return f'CharmChannel<{self.name}>'
+
+    @property
+    def raw_charm_info(self):
+        if not self._raw_charm_info:
+            self._raw_charm_info = requests.get(
+                self.INFO_URL.format(charm=self.project.charmhub_name)
+            )
+        return self._raw_charm_info
+
+    @property
+    def channel_map(self):
+        return self.raw_charm_info.json()['channel-map']
+
+    def close(
+            self,
+            dry_run: bool = True,
+            check: bool = True,
+    ) -> Optional[subprocess.CompletedProcess]:
+        """Close the channel.
+
+        :param dry_run: if True run 'charmcraft close', otherwise just log
+                        the command.
+        :param check: If check is True and the exit code was non-zero, it
+                      raises a CalledProcessError.
+        :returns: an instance of CompletedProcess if dry_run is False,
+                  otherwise None
+        """
+        cmd = f'charmcraft close {self.project.charmhub_name} {self.name}'
+        if dry_run:
+            print(cmd, ' # dry-run mode')
+        else:
+            self.log.debug('Running: %s', cmd)
+            return subprocess.run(cmd, check=check)
+
+    def release(
+            self,
+            revision: int,
+            dry_run: bool = True,
+            check: bool = True,
+    ) -> Optional[subprocess.CompletedProcess]:
+        """Release a charm's revision in the channel.
+
+        :param revision: charm's revision id to release
+        :param dry_run: if True run 'charmcraft release', otherwise just log
+                        the command.
+        :param check: If check is True and the exit code was non-zero, it
+                      raises a CalledProcessError.
+        :returns: an instance of CompletedProcess if dry_run is False,
+                  otherwise None
+        """
+        cmd = (f"charmcraft release {self.project.charmhub_name} "
+               f"--revision={revision} "
+               f"--channel={self.name}")
+        if dry_run:
+            print(cmd, " # dry-run mode")
+        else:
+            self.log.debug('Running: %s', cmd)
+            return subprocess.run(cmd, check=check)
+
+    def decode_channel_map(self,
+                           base: Optional[str],
+                           arch: Optional[str] = None,
+                           ) -> Optional[Set[int]]:
+        """Decode the channel.
+
+        :param base: base channel.
+        :param arch: Filter by architecture
+        :returns: The revision id associated with this channel.
+        """
+        revisions = set()
+        for i, channel_def in enumerate(self.channel_map):
+            base_arch = channel_def['channel']['base']['architecture']
+            base_chan = channel_def['channel']['base']['channel']
+            chan_track = channel_def['channel']['track']
+            chan_risk = channel_def['channel']['risk']
+            revision = channel_def['revision']
+            revision_num = revision['revision']
+            arches = [f"{v['architecture']}/{v['channel']}"
+                      for v in revision['bases']]
+
+            if (
+                    base_chan == base and
+                    (chan_track, chan_risk) == (self.track, self.risk) and
+                    (arch is None or arch in arches)
+            ):
+                logger.info("%s (%s) -> %s %s %d %s/%s -> [%s]",
+                            self.project.charmhub_name, i, base_arch,
+                            base_chan, revision_num, chan_track,
+                            chan_risk, ", ".join(arches))
+                revisions.add(revision_num)
+
+        return revisions
 
 
 class CharmProject:
@@ -925,6 +1037,27 @@ class CharmProject:
             return
 
         self.lp_repo.code_import.requestImport()
+
+    def copy_channel(self,
+                     source: CharmChannel,
+                     destination: CharmChannel,
+                     base: str,
+                     dry_run: bool = True):
+        """Copy the published charms from one channel to another.
+
+        :param source: the source channel
+        :param destination: the destination channel
+        :param base: Filter by base (e.g. '20.04', '22.04', etc)
+        :param dry_run: if True it won't commit the operation
+        :returns: the list of revisions that have been copied.
+        """
+        copied_revisions = set()
+        revisions = source.decode_channel_map(base)
+        for revision in revisions:
+            destination.release(revision, dry_run=dry_run)
+            copied_revisions.add(revision)
+
+        return copied_revisions
 
     def _find_recipes(self, branches):
         info = self._calc_recipes_for_repo()
