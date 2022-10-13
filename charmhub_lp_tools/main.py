@@ -55,7 +55,7 @@ import sys
 import yaml
 
 from datetime import datetime
-from typing import (Any, Dict, Iterator, List, Optional, NamedTuple)
+from typing import (Any, Dict, Iterator, List, Optional, NamedTuple, Set)
 try:
     from zoneinfo import ZoneInfo
 except ImportError:
@@ -524,6 +524,12 @@ def parse_args(config_from_file: FileConfig) -> argparse.Namespace:
         help=('Select charm(s) that run on the base (e.g. 20.04, 22.04). '
               'Can be used multiple times.')
     )
+    copy_channel_command.add_argument(
+        '--force',
+        dest='force',
+        action='store_true',
+        help='Force the copy of charms for undefined channels in the config.'
+    )
     copy_channel_command.set_defaults(func=copy_channel)
 
     args = parser.parse_args()
@@ -763,22 +769,34 @@ def request_code_import(args: argparse.Namespace,
 
 def copy_channel(args: argparse.Namespace,
                  gc: GroupConfig,
-                 ) -> None:
+                 ) -> Optional[Set[int]]:
     """Copy the charms released from a channel to another one.
 
     :param args: the arguments parsed from the command line.
     :para gc: The GroupConfig; i.e. all the charms and their config.
+    :returns: a set of all the revisions copied.
     """
+    cp_revs = {}
     for cp in gc.projects(select=args.charms):
         src_channel = CharmChannel(cp, args.src_channel)
         dst_channel = CharmChannel(cp, args.dst_channel)
 
+        if src_channel not in cp.channels and not args.force:
+            raise ValueError(f'{src_channel} not in {cp.channels}')
+
+        if dst_channel not in cp.channels and not args.force:
+            raise ValueError(f'{dst_channel} not in {cp.channels}')
+
         if args.close_dst_channel_before:
             dst_channel.close(dry_run=not args.confirmed)
 
+        cp_revs[cp.charmhub_name] = set()
         for base in args.bases:
-            cp.copy_channel(src_channel, dst_channel,
-                            base=base, dry_run=not args.confirmed)
+            revs = cp.copy_channel(src_channel, dst_channel,
+                                   base=base,
+                                   dry_run=not args.confirmed)
+            cp_revs[cp.charmhub_name] = cp_revs[cp.charmhub_name].union(revs)
+    return cp_revs
 
 
 def setup_logging(loglevel: str) -> None:

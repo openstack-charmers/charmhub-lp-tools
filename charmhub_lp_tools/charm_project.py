@@ -69,6 +69,13 @@ class CharmChannel:
     def __repr__(self):
         return f'CharmChannel<{self.name}>'
 
+    def __eq__(self, other: 'CharmChannel'):
+        return (self.project.charmhub_name, self.name) == \
+            (other.project.charmhub_name, other.name)
+
+    def __hash__(self):
+        return hash((self.project.charmhub_name, self.name))
+
     @property
     def raw_charm_info(self):
         if not self._raw_charm_info:
@@ -95,11 +102,11 @@ class CharmChannel:
         :returns: an instance of CompletedProcess if dry_run is False,
                   otherwise None
         """
-        cmd = f'charmcraft close {self.project.charmhub_name} {self.name}'
+        cmd = ['charmcraft', 'close', self.project.charmhub_name, self.name]
         if dry_run:
-            print(cmd, ' # dry-run mode')
+            print(' '.join(cmd), ' # dry-run mode')
         else:
-            self.log.debug('Running: %s', cmd)
+            self.log.debug('Running: %s', ' '.join(cmd))
             return subprocess.run(cmd, check=check)
 
     def release(
@@ -118,13 +125,12 @@ class CharmChannel:
         :returns: an instance of CompletedProcess if dry_run is False,
                   otherwise None
         """
-        cmd = (f"charmcraft release {self.project.charmhub_name} "
-               f"--revision={revision} "
-               f"--channel={self.name}")
+        cmd = ['charmcraft', 'release', self.project.charmhub_name,
+               f'--revision={revision}', f'--channel={self.name}']
         if dry_run:
-            print(cmd, " # dry-run mode")
+            print(' '.join(cmd), " # dry-run mode")
         else:
-            self.log.debug('Running: %s', cmd)
+            self.log.debug('Running: %s', ' '.join(cmd))
             return subprocess.run(cmd, check=check)
 
     def decode_channel_map(self,
@@ -257,6 +263,7 @@ class CharmProject:
         self._lp_project = None
         self.repository: str = config.get('repository')  # type: ignore
         self._lp_repo = None
+        self._channels = None  # type: Set
 
         self.branches: Dict[str, Dict[str, Any]] = {}
 
@@ -278,6 +285,9 @@ class CharmProject:
 
             self.branches[ref].update(branch_info)
 
+        # clear cached channels
+        self._channels = None
+
     def merge(self, config: Dict[str, Any]) -> None:
         """Merge config, by overwriting."""
         self.name = config.get('name', self.name)
@@ -287,6 +297,16 @@ class CharmProject:
                                             self.launchpad_project)
         self.repository = config.get('repository', self.repository)
         self._add_branches(config.get('branches', {}))
+
+    @property
+    def channels(self) -> Set[CharmChannel]:
+        if not self._channels:
+            self._channels = set()
+            for key, value in self.branches.items():
+                for channel in value['channels']:
+                    self._channels.add(CharmChannel(self, channel))
+
+        return self._channels
 
     @property
     def lp_team(self) -> TypeLPObject:
