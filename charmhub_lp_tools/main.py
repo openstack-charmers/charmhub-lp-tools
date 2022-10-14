@@ -530,6 +530,13 @@ def parse_args(config_from_file: FileConfig) -> argparse.Namespace:
         action='store_true',
         help='Force the copy of charms for undefined channels in the config.'
     )
+    copy_channel_command.add_argument(
+        '--retries', metavar='N',
+        dest='retries',
+        type=int,
+        default=3,
+        help='Retry calls when charmhub issues a 504 error',
+    )
     copy_channel_command.set_defaults(func=copy_channel)
 
     args = parser.parse_args()
@@ -788,13 +795,15 @@ def copy_channel(args: argparse.Namespace,
             raise ValueError(f'{dst_channel} not in {cp.channels}')
 
         if args.close_dst_channel_before:
-            dst_channel.close(dry_run=not args.confirmed)
+            dst_channel.close(dry_run=not args.confirmed,
+                              retries=args.retries)
 
         cp_revs[cp.charmhub_name] = set()
         for base in args.bases:
             revs = cp.copy_channel(src_channel, dst_channel,
                                    base=base,
-                                   dry_run=not args.confirmed)
+                                   dry_run=not args.confirmed,
+                                   retries=args.retries)
             cp_revs[cp.charmhub_name] = cp_revs[cp.charmhub_name].union(revs)
     return cp_revs
 

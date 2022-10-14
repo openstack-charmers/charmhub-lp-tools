@@ -21,15 +21,21 @@ from typing import (Any, Dict, List, Tuple, IO, Optional, Set)
 import sys
 import time
 
-import lazr.restfulclient.errors
-
 from contextlib import suppress
 
+import lazr.restfulclient.errors
 import requests
+
+from tenacity import (
+    Retrying,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_fixed,
+)
 
 from .launchpadtools import LaunchpadTools, TypeLPObject
 from .charmhub import authorize_from_macaroon_dict
-
+from .exceptions import CharmcraftError504
 
 # build states
 BUILD_SUCCESSFUL = 'Successfully built'
@@ -43,6 +49,8 @@ ERROR_PATTERNS = '(ERROR|ModuleNotFoundError)'
 DEFAULT_RECIPE_FORMAT = '{project}.{branch}.{track}'
 
 CHARMHUB_BASE = "https://api.charmhub.io/v2/charms"
+CHARMCRAFT_ERROR_504 = ('Issue encountered while processing your request: '
+                        '[504] Gateway Time-out.')
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +58,39 @@ logger = logging.getLogger(__name__)
 def setup_logging(loglevel: str) -> None:
     """Sets up some basic logging."""
     logger.setLevel(getattr(logging, loglevel, 'ERROR'))
+
+
+def run_charmcraft(
+        cmd: List[str],
+        check: bool,
+        retries: int = 0,
+) -> Optional[subprocess.CompletedProcess]:
+    """Run charmcraft.
+
+    :param cmd: charmcraft command to run, passed as it is to subprocess.run().
+    :param check: If check is True and the exit code was non-zero, it raises
+                  a CalledProcessError.
+    :param retries: Retry if charmhub responds with a 500 error.
+    """
+    for attempt in Retrying(wait=wait_fixed(1),
+                            retry=retry_if_exception_type(CharmcraftError504),
+                            reraise=True,
+                            stop=stop_after_attempt(retries)):
+        with attempt:
+            try:
+                p = subprocess.run(cmd,
+                                   check=check,
+                                   text=True,
+                                   # combine stdout and stderr
+                                   stdout=subprocess.PIPE,
+                                   stderr=subprocess.STDOUT)
+                return p
+            except subprocess.CalledProcessError as ex:
+                logger.error(ex.stdout)
+                if ex.stdout and CHARMCRAFT_ERROR_504 in ex.stdout:
+                    raise CharmcraftError504()
+                else:
+                    raise
 
 
 class CharmChannel:
@@ -92,6 +133,7 @@ class CharmChannel:
             self,
             dry_run: bool = True,
             check: bool = True,
+            retries: int = 0,
     ) -> Optional[subprocess.CompletedProcess]:
         """Close the channel.
 
@@ -99,6 +141,7 @@ class CharmChannel:
                         the command.
         :param check: If check is True and the exit code was non-zero, it
                       raises a CalledProcessError.
+        :param retries: Retry if charmhub responds with a 500 error.
         :returns: an instance of CompletedProcess if dry_run is False,
                   otherwise None
         """
@@ -107,13 +150,14 @@ class CharmChannel:
             print(' '.join(cmd), ' # dry-run mode')
         else:
             self.log.debug('Running: %s', ' '.join(cmd))
-            return subprocess.run(cmd, check=check)
+            return run_charmcraft(cmd, check=check, retries=retries)
 
     def release(
             self,
             revision: int,
             dry_run: bool = True,
             check: bool = True,
+            retries: int = 0,
     ) -> Optional[subprocess.CompletedProcess]:
         """Release a charm's revision in the channel.
 
@@ -122,6 +166,7 @@ class CharmChannel:
                         the command.
         :param check: If check is True and the exit code was non-zero, it
                       raises a CalledProcessError.
+        :param retries: Retry if charmhub responds with a 500 error.
         :returns: an instance of CompletedProcess if dry_run is False,
                   otherwise None
         """
@@ -131,7 +176,7 @@ class CharmChannel:
             print(' '.join(cmd), " # dry-run mode")
         else:
             self.log.debug('Running: %s', ' '.join(cmd))
-            return subprocess.run(cmd, check=check)
+            return run_charmcraft(cmd, check=check, retries=retries)
 
     def decode_channel_map(self,
                            base: Optional[str],
@@ -1062,19 +1107,22 @@ class CharmProject:
                      source: CharmChannel,
                      destination: CharmChannel,
                      base: str,
-                     dry_run: bool = True):
+                     dry_run: bool = True,
+                     retries: int = 0):
         """Copy the published charms from one channel to another.
 
         :param source: the source channel
         :param destination: the destination channel
         :param base: Filter by base (e.g. '20.04', '22.04', etc)
         :param dry_run: if True it won't commit the operation
+        :param retries: Retry if charmhub responds with a 500 error.
         :returns: the list of revisions that have been copied.
         """
         copied_revisions = set()
         revisions = source.decode_channel_map(base)
         for revision in revisions:
-            destination.release(revision, dry_run=dry_run)
+            destination.release(revision, dry_run=dry_run,
+                                retries=retries)
             copied_revisions.add(revision)
 
         return copied_revisions
