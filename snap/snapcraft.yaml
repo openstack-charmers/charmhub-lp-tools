@@ -25,6 +25,8 @@ confinement: strict
 apps:
   charmhub-lp-tool:
     command: bin/charmhub-lp-tool
+    environment:
+      PYTHONPATH: "$SNAP/lib/python3.8/site-packages/"
     plugs:
       - network
       - home
