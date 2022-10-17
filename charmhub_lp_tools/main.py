@@ -795,11 +795,14 @@ def copy_channel(args: argparse.Namespace,
             raise ValueError(f'{dst_channel} not in {cp.channels}')
 
         if args.close_dst_channel_before:
+            logger.info('Closing %s: %s', cp.charmhub_name, dst_channel.name)
             dst_channel.close(dry_run=not args.confirmed,
                               retries=args.retries)
 
         cp_revs[cp.charmhub_name] = set()
         for base in args.bases:
+            logger.info('Copying charm %s from %s to %s', cp.charmhub_name,
+                        src_channel.name, dst_channel.name)
             revs = cp.copy_channel(src_channel, dst_channel,
                                    base=base,
                                    dry_run=not args.confirmed,

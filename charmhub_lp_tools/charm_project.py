@@ -208,10 +208,11 @@ class CharmChannel:
                     (chan_track, chan_risk) == (self.track, self.risk) and
                     (arch is None or arch in arches)
             ):
-                logger.info("%s (%s) -> %s %s %d %s/%s -> [%s]",
-                            self.project.charmhub_name, i, base_arch,
-                            base_chan, revision_num, chan_track,
-                            chan_risk, ", ".join(arches))
+                logger.debug(("%s (%s) -> base_arch=%s base_chan=%s "
+                              "revision=%d channel=%s/%s -> arches=[%s]"),
+                             self.project.charmhub_name, i, base_arch,
+                             base_chan, revision_num, chan_track,
+                             chan_risk, ", ".join(arches))
                 revisions.add(revision_num)
 
         return revisions
@@ -326,6 +327,7 @@ class CharmProject:
         self.lpt = lpt
         self.name: str = config.get('name')  # type: ignore
         self.team: str = config.get('team')  # type: ignore
+        self.log = logging.getLogger(f'{__name__}.{self.__class__.__name__}')
         self._lp_team = None
         self.charmhub_name: str = config.get('charmhub')  # type: ignore
         self.launchpad_project: str = config.get('launchpad')  # type: ignore
@@ -1145,6 +1147,10 @@ class CharmProject:
         copied_revisions = set()
         revisions = source.decode_channel_map(base)
         for revision in revisions:
+            self.log.info('Releasing %s revision %s into channel %s',
+                          self.charmhub_name,
+                          revision,
+                          destination.name)
             destination.release(revision, dry_run=dry_run,
                                 retries=retries)
             copied_revisions.add(revision)
