@@ -39,3 +39,5 @@ parts:
       - ./requirements.txt
     stage-snaps:
       - charmcraft/2.x/stable
+    build-packages:
+      - libapt-pkg-dev  # to build python-apt

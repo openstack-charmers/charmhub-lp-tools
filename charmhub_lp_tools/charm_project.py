@@ -34,7 +34,7 @@ from tenacity import (
 )
 
 from .launchpadtools import LaunchpadTools, TypeLPObject
-from .charmhub import authorize_from_macaroon_dict
+from .charmhub import authorize_from_macaroon_dict, get_store_client
 from .exceptions import CharmcraftError504
 
 # build states
@@ -172,6 +172,10 @@ class CharmChannel:
         """
         cmd = ['charmcraft', 'release', self.project.charmhub_name,
                f'--revision={revision}', f'--channel={self.name}']
+
+        resources = self.find_resources(revision)
+        for resource in resources:
+            cmd.append(f'--resource={resource.name}:{resource.revision}')
         if dry_run:
             print(' '.join(cmd), " # dry-run mode")
         else:
@@ -211,6 +215,26 @@ class CharmChannel:
                 revisions.add(revision_num)
 
         return revisions
+
+    def find_resources(
+            self,
+            revision: int
+    ) -> Optional[List[object]]:
+        """Find resources associated to a revision.
+
+        :param revision: revision number
+        :returns: a list of resources that were released with a charm revision
+        """
+        store = get_store_client()
+        channel_map, channels, revisions = store.list_releases(
+            self.project.charmhub_name
+        )
+
+        for release in channel_map:
+            if release.revision == revision:
+                return release.resources
+
+        return []  # no resources found
 
 
 class CharmProject:

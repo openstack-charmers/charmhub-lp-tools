@@ -19,6 +19,7 @@ import logging
 import pprint
 from typing import Dict, Optional
 
+from charmcraft.commands.store import store
 from macaroonbakery import bakery, httpbakery
 from pymacaroons.serializers import JsonSerializer
 
@@ -60,3 +61,24 @@ def authorize_from_macaroon_dict(auth_data: Dict) -> str:
     result = discharges[0].macaroon.serialize(JsonSerializer())
     logger.debug("Result is:\n%s", pprint.pformat(result))
     return result
+
+
+class CharmhubConfig:
+    api_url = "https://api.charmhub.io"
+    storage_url = "https://storage.snapcraftcontent.com"
+    registry_url = "https://registry.jujucharms.com"
+
+
+def get_store_client():
+    config = CharmhubConfig()
+    mystore = store.Store(config)
+
+    try:
+        mystore.whoami()
+    except Exception:
+        # loging in again
+        mystore.logout()
+        mystore.login()
+        mystore.whoami()
+
+    return mystore

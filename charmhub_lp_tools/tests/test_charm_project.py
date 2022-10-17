@@ -48,7 +48,11 @@ class TestCharmChannel(BaseTest):
             self.assertEqual(charm_channel.decode_channel_map('22.04'),
                              {96, 93, 94, 95})
 
-    def test_release(self):
+    @mock.patch('charmhub_lp_tools.charm_project.get_store_client')
+    def test_release(self, get_store_client):
+        store_client = mock.MagicMock()
+        store_client.list_releases.return_value = ([], [], [])
+        get_store_client.return_value = store_client
         charm_channel = charm_project.CharmChannel(self.project,
                                                    'yoga/stable')
 
