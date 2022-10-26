@@ -25,6 +25,8 @@ confinement: strict
 apps:
   charmhub-lp-tool:
     command: bin/charmhub-lp-tool
+    environment:
+      PYTHONPATH: "$SNAP/lib/python3.8/site-packages/"
     plugs:
       - network
       - home
@@ -35,8 +37,7 @@ parts:
     source: ./
     requirements:
       - ./requirements.txt
-    # stage-packages:
-    #   - python3-cryptography  # required by python3-secretstorage
-    #   - python3-gi  # required by python3-secretstorage
-    #   - python3-cairo  # required by python3-gi
-    #   - python3-secretstorage
+    stage-snaps:
+      - charmcraft/2.x/stable
+    build-packages:
+      - libapt-pkg-dev  # to build python-apt

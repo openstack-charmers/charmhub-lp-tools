@@ -1,0 +1,3 @@
+[run]
+omit = charmhub_lp_tools/tests/*
+relative_files = true

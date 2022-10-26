@@ -1,0 +1,17 @@
+Issue encountered while processing your request: [504] Gateway Time-out.                                                                                                                                    
+Full execution log: '/home/freyes/snap/charmhub-lp-tool_dev/x9/.cache/charmcraft/log/charmcraft-20221014-151046.430887.log'                                                                                 
+2022-10-14 15:10:52,484 ERROR charmhub_lp_tools.main Unexpected error: Command '['charmcraft', 'close', 'awesome', 'foo/edge']' returned non-zero exit status 1.
+Traceback (most recent call last):
+  File "/snap/charmhub-lp-tool_dev/x9/bin/charmhub-lp-tool", line 8, in <module>
+    sys.exit(cli_main())
+  File "/snap/charmhub-lp-tool/x9/lib/python3.8/site-packages/charmhub_lp_tools/main.py", line 845, in cli_main
+    main()
+  File "/snap/charmhub-lp-tool/x9/lib/python3.8/site-packages/charmhub_lp_tools/main.py", line 839, in main
+    args.func(args, gc)
+  File "/snap/charmhub-lp-tool/x9/lib/python3.8/site-packages/charmhub_lp_tools/main.py", line 791, in copy_channel
+    dst_channel.close(dry_run=not args.confirmed)
+  File "/snap/charmhub-lp-tool/x9/lib/python3.8/site-packages/charmhub_lp_tools/charm_project.py", line 110, in close
+    return subprocess.run(cmd, check=check)
+  File "/snap/charmhub-lp-tool/x9/usr/lib/python3.8/subprocess.py", line 516, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['charmcraft', 'close', 'awesome', 'foo/edge']' returned non-zero exit status 1.

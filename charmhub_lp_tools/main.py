@@ -55,7 +55,7 @@ import sys
 import yaml
 
 from datetime import datetime
-from typing import (Any, Dict, Iterator, List, Optional, NamedTuple)
+from typing import (Any, Dict, Iterator, List, Optional, NamedTuple, Set)
 try:
     from zoneinfo import ZoneInfo
 except ImportError:
@@ -70,6 +70,7 @@ from .launchpadtools import (
     setup_logging as lpt_setup_logging,
 )
 from .charm_project import (
+    CharmChannel,
     CharmProject,
     setup_logging as cp_setup_logging,
 )
@@ -481,6 +482,62 @@ def parse_args(config_from_file: FileConfig) -> argparse.Namespace:
               'should really submit the requests to Launchpad.')
     )
     request_code_import_command.set_defaults(func=request_code_import)
+    # copy-channel
+    copy_channel_command = subparser.add_parser(
+        'copy-channel',
+        help=('Copy all the charms available in a channel (track/risk) to '
+              'another channel'),
+    )
+    copy_channel_command.add_argument(
+        '--i-really-mean-it',
+        dest='confirmed',
+        action='store_true',
+        default=False,
+        help=('This flag must be supplied to indicate that the operation '
+              'should really commit the changes.')
+    )
+    copy_channel_command.add_argument(
+        '-s', '--source', dest='src_channel',
+        metavar='CHANNEL', required=True,
+        help='Source channel to copy charms from.'
+    )
+    copy_channel_command.add_argument(
+        '-d', '--destination', dest='dst_channel',
+        metavar='CHANNEL', required=True,
+        help='Destination channel to copy charms to.'
+    )
+    copy_channel_command.add_argument(
+        '--close-channel-before',
+        dest='close_dst_channel_before',
+        action='store_true',
+        default=False,
+        help=('Close the destination channel before copying the new charms '
+              'to it.'),
+    )
+    copy_channel_command.add_argument(
+        '--base',
+        dest='bases',
+        action='append',
+        metavar='BASE',
+        required=True,
+        type=str,
+        help=('Select charm(s) that run on the base (e.g. 20.04, 22.04). '
+              'Can be used multiple times.')
+    )
+    copy_channel_command.add_argument(
+        '--force',
+        dest='force',
+        action='store_true',
+        help='Force the copy of charms for undefined channels in the config.'
+    )
+    copy_channel_command.add_argument(
+        '--retries', metavar='N',
+        dest='retries',
+        type=int,
+        default=3,
+        help='Retry calls when charmhub issues a 504 error',
+    )
+    copy_channel_command.set_defaults(func=copy_channel)
 
     args = parser.parse_args()
     return args
@@ -715,6 +772,43 @@ def request_code_import(args: argparse.Namespace,
     for cp in gc.projects(select=args.charms):
         cp.request_code_import(dry_run=not args.confirmed)
         print(f'Requested import of {cp}')
+
+
+def copy_channel(args: argparse.Namespace,
+                 gc: GroupConfig,
+                 ) -> Optional[Set[int]]:
+    """Copy the charms released from a channel to another one.
+
+    :param args: the arguments parsed from the command line.
+    :para gc: The GroupConfig; i.e. all the charms and their config.
+    :returns: a set of all the revisions copied.
+    """
+    cp_revs = {}
+    for cp in gc.projects(select=args.charms):
+        src_channel = CharmChannel(cp, args.src_channel)
+        dst_channel = CharmChannel(cp, args.dst_channel)
+
+        if src_channel not in cp.channels and not args.force:
+            raise ValueError(f'{src_channel} not in {cp.channels}')
+
+        if dst_channel not in cp.channels and not args.force:
+            raise ValueError(f'{dst_channel} not in {cp.channels}')
+
+        if args.close_dst_channel_before:
+            logger.info('Closing %s: %s', cp.charmhub_name, dst_channel.name)
+            dst_channel.close(dry_run=not args.confirmed,
+                              retries=args.retries)
+
+        cp_revs[cp.charmhub_name] = set()
+        for base in args.bases:
+            logger.info('Copying charm %s from %s to %s', cp.charmhub_name,
+                        src_channel.name, dst_channel.name)
+            revs = cp.copy_channel(src_channel, dst_channel,
+                                   base=base,
+                                   dry_run=not args.confirmed,
+                                   retries=args.retries)
+            cp_revs[cp.charmhub_name] = cp_revs[cp.charmhub_name].union(revs)
+    return cp_revs
 
 
 def setup_logging(loglevel: str) -> None:

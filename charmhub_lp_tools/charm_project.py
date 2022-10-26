@@ -17,19 +17,25 @@ import json
 import logging
 import subprocess
 import tempfile
-from typing import (Any, Dict, List, Tuple, IO, Optional)
+from typing import (Any, Dict, List, Tuple, IO, Optional, Set)
 import sys
 import time
 
-import lazr.restfulclient.errors
-
 from contextlib import suppress
 
+import lazr.restfulclient.errors
 import requests
 
-from .launchpadtools import LaunchpadTools, TypeLPObject
-from .charmhub import authorize_from_macaroon_dict
+from tenacity import (
+    Retrying,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_fixed,
+)
 
+from .launchpadtools import LaunchpadTools, TypeLPObject
+from .charmhub import authorize_from_macaroon_dict, get_store_client
+from .exceptions import CharmcraftError504
 
 # build states
 BUILD_SUCCESSFUL = 'Successfully built'
@@ -42,12 +48,194 @@ FAILED_TO_UPLOAD = 'Failed to upload'
 ERROR_PATTERNS = '(ERROR|ModuleNotFoundError)'
 DEFAULT_RECIPE_FORMAT = '{project}.{branch}.{track}'
 
+CHARMHUB_BASE = "https://api.charmhub.io/v2/charms"
+CHARMCRAFT_ERROR_504 = ('Issue encountered while processing your request: '
+                        '[504] Gateway Time-out.')
+
 logger = logging.getLogger(__name__)
 
 
 def setup_logging(loglevel: str) -> None:
     """Sets up some basic logging."""
     logger.setLevel(getattr(logging, loglevel, 'ERROR'))
+
+
+def run_charmcraft(
+        cmd: List[str],
+        check: bool,
+        retries: int = 0,
+) -> Optional[subprocess.CompletedProcess]:
+    """Run charmcraft.
+
+    :param cmd: charmcraft command to run, passed as it is to subprocess.run().
+    :param check: If check is True and the exit code was non-zero, it raises
+                  a CalledProcessError.
+    :param retries: Retry if charmhub responds with a 500 error.
+    """
+    for attempt in Retrying(wait=wait_fixed(1),
+                            retry=retry_if_exception_type(CharmcraftError504),
+                            reraise=True,
+                            stop=stop_after_attempt(retries)):
+        with attempt:
+            try:
+                p = subprocess.run(cmd,
+                                   check=check,
+                                   text=True,
+                                   # combine stdout and stderr
+                                   stdout=subprocess.PIPE,
+                                   stderr=subprocess.STDOUT)
+                return p
+            except subprocess.CalledProcessError as ex:
+                logger.error(ex.stdout)
+                if ex.stdout and CHARMCRAFT_ERROR_504 in ex.stdout:
+                    raise CharmcraftError504()
+                else:
+                    raise
+
+
+class CharmChannel:
+
+    INFO_URL = CHARMHUB_BASE + "/info/{charm}?fields=channel-map"
+
+    def __init__(self, project: 'CharmProject', name: str):
+        self.name = name
+        (self.track, self.risk) = self.name.split('/')
+        self.project = project
+        self._raw_charm_info = None
+        self.log = logging.getLogger(f'{__name__}.{self.__class__.__name__}')
+
+    def __str__(self):
+        return self.name
+
+    def __repr__(self):
+        return f'CharmChannel<{self.name}>'
+
+    def __eq__(self, other: 'CharmChannel'):
+        return (self.project.charmhub_name, self.name) == \
+            (other.project.charmhub_name, other.name)
+
+    def __hash__(self):
+        return hash((self.project.charmhub_name, self.name))
+
+    @property
+    def raw_charm_info(self):
+        if not self._raw_charm_info:
+            self._raw_charm_info = requests.get(
+                self.INFO_URL.format(charm=self.project.charmhub_name)
+            )
+        return self._raw_charm_info
+
+    @property
+    def channel_map(self):
+        return self.raw_charm_info.json()['channel-map']
+
+    def close(
+            self,
+            dry_run: bool = True,
+            check: bool = True,
+            retries: int = 0,
+    ) -> Optional[subprocess.CompletedProcess]:
+        """Close the channel.
+
+        :param dry_run: if True run 'charmcraft close', otherwise just log
+                        the command.
+        :param check: If check is True and the exit code was non-zero, it
+                      raises a CalledProcessError.
+        :param retries: Retry if charmhub responds with a 500 error.
+        :returns: an instance of CompletedProcess if dry_run is False,
+                  otherwise None
+        """
+        cmd = ['charmcraft', 'close', self.project.charmhub_name, self.name]
+        if dry_run:
+            print(' '.join(cmd), ' # dry-run mode')
+        else:
+            self.log.debug('Running: %s', ' '.join(cmd))
+            return run_charmcraft(cmd, check=check, retries=retries)
+
+    def release(
+            self,
+            revision: int,
+            dry_run: bool = True,
+            check: bool = True,
+            retries: int = 0,
+    ) -> Optional[subprocess.CompletedProcess]:
+        """Release a charm's revision in the channel.
+
+        :param revision: charm's revision id to release
+        :param dry_run: if True run 'charmcraft release', otherwise just log
+                        the command.
+        :param check: If check is True and the exit code was non-zero, it
+                      raises a CalledProcessError.
+        :param retries: Retry if charmhub responds with a 500 error.
+        :returns: an instance of CompletedProcess if dry_run is False,
+                  otherwise None
+        """
+        cmd = ['charmcraft', 'release', self.project.charmhub_name,
+               f'--revision={revision}', f'--channel={self.name}']
+
+        resources = self.find_resources(revision)
+        for resource in resources:
+            cmd.append(f'--resource={resource.name}:{resource.revision}')
+        if dry_run:
+            print(' '.join(cmd), " # dry-run mode")
+        else:
+            self.log.debug('Running: %s', ' '.join(cmd))
+            return run_charmcraft(cmd, check=check, retries=retries)
+
+    def decode_channel_map(self,
+                           base: Optional[str],
+                           arch: Optional[str] = None,
+                           ) -> Optional[Set[int]]:
+        """Decode the channel.
+
+        :param base: base channel.
+        :param arch: Filter by architecture
+        :returns: The revision id associated with this channel.
+        """
+        revisions = set()
+        for i, channel_def in enumerate(self.channel_map):
+            base_arch = channel_def['channel']['base']['architecture']
+            base_chan = channel_def['channel']['base']['channel']
+            chan_track = channel_def['channel']['track']
+            chan_risk = channel_def['channel']['risk']
+            revision = channel_def['revision']
+            revision_num = revision['revision']
+            arches = [f"{v['architecture']}/{v['channel']}"
+                      for v in revision['bases']]
+
+            if (
+                    base_chan == base and
+                    (chan_track, chan_risk) == (self.track, self.risk) and
+                    (arch is None or arch in arches)
+            ):
+                logger.debug(("%s (%s) -> base_arch=%s base_chan=%s "
+                              "revision=%d channel=%s/%s -> arches=[%s]"),
+                             self.project.charmhub_name, i, base_arch,
+                             base_chan, revision_num, chan_track,
+                             chan_risk, ", ".join(arches))
+                revisions.add(revision_num)
+
+        return revisions
+
+    def find_resources(
+            self,
+            revision: int
+    ) -> Optional[List[object]]:
+        """Find resources associated to a revision.
+
+        :param revision: revision number
+        :returns: a list of resources that were released with a charm revision
+        """
+        store = get_store_client()
+        channel_map, channels, revisions = store.list_releases(
+            self.project.charmhub_name
+        )
+
+        for release in channel_map:
+            if release.revision == revision:
+                return release.resources
+
+        return []  # no resources found
 
 
 class CharmProject:
@@ -139,12 +327,14 @@ class CharmProject:
         self.lpt = lpt
         self.name: str = config.get('name')  # type: ignore
         self.team: str = config.get('team')  # type: ignore
+        self.log = logging.getLogger(f'{__name__}.{self.__class__.__name__}')
         self._lp_team = None
         self.charmhub_name: str = config.get('charmhub')  # type: ignore
         self.launchpad_project: str = config.get('launchpad')  # type: ignore
         self._lp_project = None
         self.repository: str = config.get('repository')  # type: ignore
         self._lp_repo = None
+        self._channels = None  # type: Set
 
         self.branches: Dict[str, Dict[str, Any]] = {}
 
@@ -166,6 +356,9 @@ class CharmProject:
 
             self.branches[ref].update(branch_info)
 
+        # clear cached channels
+        self._channels = None
+
     def merge(self, config: Dict[str, Any]) -> None:
         """Merge config, by overwriting."""
         self.name = config.get('name', self.name)
@@ -175,6 +368,16 @@ class CharmProject:
                                             self.launchpad_project)
         self.repository = config.get('repository', self.repository)
         self._add_branches(config.get('branches', {}))
+
+    @property
+    def channels(self) -> Set[CharmChannel]:
+        if not self._channels:
+            self._channels = set()
+            for key, value in self.branches.items():
+                for channel in value['channels']:
+                    self._channels.add(CharmChannel(self, channel))
+
+        return self._channels
 
     @property
     def lp_team(self) -> TypeLPObject:
@@ -925,6 +1128,34 @@ class CharmProject:
             return
 
         self.lp_repo.code_import.requestImport()
+
+    def copy_channel(self,
+                     source: CharmChannel,
+                     destination: CharmChannel,
+                     base: str,
+                     dry_run: bool = True,
+                     retries: int = 0):
+        """Copy the published charms from one channel to another.
+
+        :param source: the source channel
+        :param destination: the destination channel
+        :param base: Filter by base (e.g. '20.04', '22.04', etc)
+        :param dry_run: if True it won't commit the operation
+        :param retries: Retry if charmhub responds with a 500 error.
+        :returns: the list of revisions that have been copied.
+        """
+        copied_revisions = set()
+        revisions = source.decode_channel_map(base)
+        for revision in revisions:
+            self.log.info('Releasing %s revision %s into channel %s',
+                          self.charmhub_name,
+                          revision,
+                          destination.name)
+            destination.release(revision, dry_run=dry_run,
+                                retries=retries)
+            copied_revisions.add(revision)
+
+        return copied_revisions
 
     def _find_recipes(self, branches):
         info = self._calc_recipes_for_repo()
