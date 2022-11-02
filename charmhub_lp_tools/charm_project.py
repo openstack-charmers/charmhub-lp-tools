@@ -580,7 +580,8 @@ class CharmProject:
                 if dry_run:
                     print(f'Would create recipe {recipe_name} (dry_run)')
                 else:
-                    print(f'Creating charm recipe for {recipe_name}')
+                    print(f'Creating charm recipe for {recipe_name} ...',
+                          end='')
                     build_from = state['build_from']
                     lp_recipe = self.lpt.create_charm_recipe(
                         recipe_name=recipe_name,
@@ -590,7 +591,7 @@ class CharmProject:
                         project=self.lp_project,
                         store_name=self.charmhub_name,
                         channels=build_from['channels'])
-                    print(f'Created charm recipe {lp_recipe.name}')
+                    print('done')
 
             else:
                 print(f'No changes needed for charm recipe {recipe_name}')
