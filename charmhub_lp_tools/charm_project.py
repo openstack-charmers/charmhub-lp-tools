@@ -942,6 +942,8 @@ class CharmProject:
                         'store_upload_status': build.store_upload_status,
                         'store_upload_error_message':
                             build.store_upload_error_message,
+                        'web_link': build.web_link,
+                        'recipe_web_link': recipe.web_link,
                     }
         return builds
 

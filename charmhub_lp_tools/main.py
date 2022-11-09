@@ -63,6 +63,7 @@ except ImportError:
 
 import humanize
 
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 from prettytable import PrettyTable
 
 from .launchpadtools import (
@@ -82,6 +83,7 @@ logger = logging.getLogger(__name__)
 
 LOGGING_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
 NOW = datetime.now(tz=ZoneInfo("UTC"))
+__THIS__ = os.path.dirname(os.path.abspath(__file__))
 
 
 class FileConfig(NamedTuple):
@@ -289,7 +291,7 @@ def parse_args(config_from_file: FileConfig) -> argparse.Namespace:
                         dest='format',
                         metavar='FORMAT',
                         type=str,
-                        choices=['plain', 'json'],
+                        choices=['plain', 'json', 'html'],
                         default='plain',
                         help='Specify the output format')
     parser.add_argument('-i', '--ignore-errors',
@@ -405,6 +407,11 @@ def parse_args(config_from_file: FileConfig) -> argparse.Namespace:
     check_builds_commands.add_argument(
         '--channel',
         help='Filter the builds by channel (e.g. latest/edge)')
+    check_builds_commands.add_argument(
+        '-o', '--output', metavar='FILE', dest='output_file',
+        default='report.html',
+        help='Write output to FILE.'
+    )
     check_builds_commands.set_defaults(func=check_builds_main)
     # authorize helper
     authorize_command = subparser.add_parser(
@@ -675,7 +682,7 @@ def check_builds_main(args: argparse.Namespace,
 
     t.field_names = cols
     t.align = 'l'  # align to the left.
-
+    all_builds = {}
     for cp in gc.projects(select=args.charms):
         if args.format == 'plain':
             print(f"Looking at charm: {cp.charmhub_name}")
@@ -684,14 +691,35 @@ def check_builds_main(args: argparse.Namespace,
 
         if args.format == 'plain':
             table_builds_add_rows(t, builds, args.detect_error)
-
         elif args.format == 'json':
             print(json.dumps(builds, default=str))
+        elif args.format == 'html':
+            all_builds[cp.charmhub_name] = {'builds': builds,
+                                            'charm_project': cp}
         else:
             raise ValueError(f'Unknown output format: {args.format}')
     if args.format == 'plain':
         print(t.get_string(sort_key=operator.itemgetter(0, 1, 2),
                            sortby="Recipe Name"))
+    elif args.format == 'html':
+        print('Generating html report ...', end='')
+        content = gen_html_report_for_builds(all_builds)
+        with open(args.output_file, 'w') as f:
+            print(f'writing to {args.output_file}...', end='')
+            content.dump(f)
+            f.write('\n')
+        print('done')
+
+
+def gen_html_report_for_builds(all_builds):
+    env = Environment(
+        loader=FileSystemLoader([os.path.join(__THIS__, 'templates')]),
+        extensions=["jinja2_humanize_extension.HumanizeExtension"],
+        autoescape=select_autoescape()
+    )
+    template = env.get_template('all_builds.html.j2')
+    return template.stream({'all_builds': all_builds,
+                            'NOW': NOW})
 
 
 def table_builds_add_rows(t: PrettyTable,

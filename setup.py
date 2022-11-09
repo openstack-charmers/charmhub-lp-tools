@@ -88,6 +88,8 @@ setup(
     zip_safe=False,
     cmdclass={'test': Tox},
     install_requires=install_require,
+    include_package_data=True,
+    package_data={'charmhub_lp_tools': ['templates/*.j2']},
     extras_require={
         'testing': tests_require,
     },
