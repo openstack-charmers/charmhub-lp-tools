@@ -336,6 +336,7 @@ class CharmProject:
         self.project_group: str = config.get('project_group')  # type: ignore
         self._lp_repo = None
         self._channels = None  # type: Set
+        self._builds = {}
 
         self.branches: Dict[str, Dict[str, Any]] = {}
 
@@ -900,6 +901,8 @@ class CharmProject:
         lp_recipes = self.lpt.get_charm_recipes(self.lp_team, self.lp_project)
         builds = collections.defaultdict(dict)
         for recipe in lp_recipes:
+            if recipe.name not in self._builds:
+                self._builds[recipe.name] = [b for b in recipe.builds]
 
             if channel and channel not in recipe.store_channels:
                 logger.debug((f'Skipping recipe {recipe.name}, because '
@@ -907,7 +910,7 @@ class CharmProject:
                 continue
 
             logger.debug(f'Getting builds for recipe {recipe.name}')
-            for build in recipe.builds:
+            for build in self._builds[recipe.name]:
                 build_arch_tag = build.distro_arch_series.architecture_tag
                 if arch_tag and arch_tag != build_arch_tag:
                     logger.debug((f'Skipping build of arch {build_arch_tag} '
