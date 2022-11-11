@@ -333,6 +333,7 @@ class CharmProject:
         self.launchpad_project: str = config.get('launchpad')  # type: ignore
         self._lp_project = None
         self.repository: str = config.get('repository')  # type: ignore
+        self.project_group: str = config.get('project_group')  # type: ignore
         self._lp_repo = None
         self._channels = None  # type: Set
 

@@ -206,20 +206,25 @@ class GroupConfig:
                 group_config = yaml.safe_load(f)
             logger.debug('group_config is: \n%s', pprint.pformat(group_config))
             project_defaults = group_config.get('defaults', {})
+            # foo/bar/openstack.yaml -> openstack
+            project_group = os.path.splitext(os.path.basename(file))[0]
             for project in group_config.get('projects', []):
                 for key, value in project_defaults.items():
                     project.setdefault(key, value)
                 logger.debug('Loaded project %s', project.get('name'))
+                project['project_group'] = project_group
                 self.add_charm_project(project)
 
     def add_charm_project(self,
                           project_config: Dict[str, Any],
                           merge: bool = False,
+                          project_group: str = None,
                           ) -> None:
         """Add a CharmProject object from the project specification dict.
 
         :param project: the project to add.
         :param merge: if merge is True, merge/overwrite the existing object.
+        :param project_group: project group name this charm belongs to.
         :raises: ValueError if merge is false and the charm project already
             exists.
         """
@@ -406,11 +411,16 @@ def parse_args(config_from_file: FileConfig) -> argparse.Namespace:
         help='Look for the ERROR in the build log.')
     check_builds_commands.add_argument(
         '--channel',
-        help='Filter the builds by channel (e.g. latest/edge)')
+        dest='channels',
+        action='append',
+        metavar='CHANNEL',
+        help=('Filter the builds by channel (e.g. latest/edge). May be '
+              'repeated for multiple channels.'),
+    )
     check_builds_commands.add_argument(
-        '-o', '--output', metavar='FILE', dest='output_file',
-        default='report.html',
-        help='Write output to FILE.'
+        '-o', '--output', metavar='DIR', dest='output_dir',
+        default='report',
+        help='Write report to DIR.'
     )
     check_builds_commands.set_defaults(func=check_builds_main)
     # authorize helper
@@ -680,46 +690,79 @@ def check_builds_main(args: argparse.Namespace,
     if args.detect_error:
         cols.append('Error')
 
+    os.makedirs(args.output_dir, exist_ok=True)
+
     t.field_names = cols
     t.align = 'l'  # align to the left.
-    all_builds = {}
-    for cp in gc.projects(select=args.charms):
-        if args.format == 'plain':
-            print(f"Looking at charm: {cp.charmhub_name}")
+    # {'openstack': {'yoga': {'edge': 'yoga-edge.html'}}}
+    reports = collections.defaultdict(lambda: collections.defaultdict(dict))
+    __cached_cp = {}
+    for channel in args.channels:
+        (track, risk) = channel.split('/')
+        fname = f'{track}-{risk}.html'
+        all_builds = {}
+        for cp_ in gc.projects(select=args.charms):
+            if cp_.charmhub_name not in __cached_cp:
+                __cached_cp[cp_.charmhub_name] = cp_
+            cp = __cached_cp[cp_.charmhub_name]
+            if args.format == 'plain':
+                print(f"Looking at charm: {cp.charmhub_name}")
+            builds = cp.get_builds(channel, args.arch_tag, args.detect_error)
 
-        builds = cp.get_builds(args.channel, args.arch_tag, args.detect_error)
+            if args.format == 'plain':
+                table_builds_add_rows(t, builds, args.detect_error)
+            elif args.format == 'json':
+                print(json.dumps(builds, default=str))
+            elif args.format == 'html' and builds:
+                all_builds[cp.charmhub_name] = {'builds': builds,
+                                                'charm_project': cp}
+                reports[cp.project_group][track][risk] = fname
 
-        if args.format == 'plain':
-            table_builds_add_rows(t, builds, args.detect_error)
-        elif args.format == 'json':
-            print(json.dumps(builds, default=str))
-        elif args.format == 'html':
-            all_builds[cp.charmhub_name] = {'builds': builds,
-                                            'charm_project': cp}
-        else:
-            raise ValueError(f'Unknown output format: {args.format}')
+        if args.format == 'html':
+            logger.debug('Generating html report.')
+            content = gen_html_report_for_builds(all_builds)
+            report_file = os.path.join(args.output_dir, fname)
+            logger.info('writing html report to %s for channel %s',
+                        report_file, channel)
+            with open(report_file, 'w') as f:
+                content.dump(f)
+                f.write('\n')
+
     if args.format == 'plain':
         print(t.get_string(sort_key=operator.itemgetter(0, 1, 2),
                            sortby="Recipe Name"))
     elif args.format == 'html':
-        print('Generating html report ...', end='')
-        content = gen_html_report_for_builds(all_builds)
-        with open(args.output_file, 'w') as f:
-            print(f'writing to {args.output_file}...', end='')
+        # generate index.
+        content = gen_html_report_index(reports)
+        with open(os.path.join(args.output_dir, 'index.html'), 'w') as f:
+            logger.info('Writing html report index to %s', f.name)
             content.dump(f)
             f.write('\n')
-        print('done')
+
+
+def gen_html_report_index(reports: Dict[str, Dict[str, Dict[str, str]]]):
+    """
+    Generate index of reports produced.
+    """
+    env = _get_jinja2_env()
+    template = env.get_template('index.html.j2')
+    return template.stream({'reports': reports,
+                            'NOW': NOW})
 
 
 def gen_html_report_for_builds(all_builds):
-    env = Environment(
+    env = _get_jinja2_env()
+    template = env.get_template('all_builds.html.j2')
+    return template.stream({'all_builds': all_builds,
+                            'NOW': NOW})
+
+
+def _get_jinja2_env():
+    return Environment(
         loader=FileSystemLoader([os.path.join(__THIS__, 'templates')]),
         extensions=["jinja2_humanize_extension.HumanizeExtension"],
         autoescape=select_autoescape()
     )
-    template = env.get_template('all_builds.html.j2')
-    return template.stream({'all_builds': all_builds,
-                            'NOW': NOW})
 
 
 def table_builds_add_rows(t: PrettyTable,
