@@ -336,7 +336,6 @@ class CharmProject:
         self.project_group: str = config.get('project_group')  # type: ignore
         self._lp_repo = None
         self._channels = None  # type: Set
-        self._builds = {}
 
         self.branches: Dict[str, Dict[str, Any]] = {}
 
@@ -869,7 +868,7 @@ class CharmProject:
                           file=file)
 
     def get_builds(self,
-                   channel: str = None,
+                   channels: Set[str] = None,
                    arch_tag: str = None,
                    detect_error: bool = False
                    ) -> Generator[Tuple[TypeLPObject, TypeLPObject],
@@ -878,7 +877,8 @@ class CharmProject:
 
         This method yields a tuple with the recipe and the build objects.
 
-        :param channel: filter list of builds by channel (e.g. 'latest/edge')
+        :param channels: filter list of builds by a set of channels (e.g.
+                         'foo/edge', 'latest/edge')
         :param arch_tag: filter list of build by architecture (e.g. 'amd64')
         :param detect_error: Attempt to found errors in the building log when
                              the built was not successful.
@@ -887,16 +887,14 @@ class CharmProject:
         lp_recipes = self.lpt.get_charm_recipes(self.lp_team, self.lp_project)
         builds = collections.defaultdict(dict)
         for recipe in lp_recipes:
-            if recipe.name not in self._builds:
-                self._builds[recipe.name] = [b for b in recipe.builds]
-
-            if channel and channel not in recipe.store_channels:
+            if (channels and
+                    not channels.intersection(set(recipe.store_channels))):
                 logger.debug((f'Skipping recipe {recipe.name}, because '
-                              f'"{channel}" not in {recipe.store_channels}'))
+                              f'"{channels}" not in {recipe.store_channels}'))
                 continue
 
             logger.debug(f'Getting builds for recipe {recipe.name}')
-            for build in self._builds[recipe.name]:
+            for build in recipe.builds:
                 build_arch_tag = build.distro_arch_series.architecture_tag
                 if arch_tag and arch_tag != build_arch_tag:
                     logger.debug((f'Skipping build of arch {build_arch_tag} '
@@ -911,7 +909,16 @@ class CharmProject:
                         (date and
                          builds[recipe.name][series_arch]['datebuilt'] < date
                          )):
-
+                    # TODO: the builds are sorted in descending order of
+                    # finishing (or starting if not completed successfully),
+                    # at some point there is no reason to keep iterating the
+                    # builds, because we only care about the last (newest)
+                    # build per base+arch, but we don't know what bases are
+                    # the ones we are looking for, also for the case of
+                    # architectures, if the charm is not a "binary charm",
+                    # then find amd64 is enough.  This optimization is
+                    # specially needed by latest/edge channel which contains
+                    # many builds.
                     yield recipe, build
 
     @staticmethod

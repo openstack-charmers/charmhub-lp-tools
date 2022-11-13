@@ -682,11 +682,10 @@ def check_builds_main(args: argparse.Namespace,
     """
     klass = get_builds_report_klass(args.format)
     build_report = klass(args.output)
-    for channel in args.channels:
-        for cp in gc.projects(select=args.charms):
-            for (recipe, build) in cp.get_builds(channel, args.arch_tag,
-                                                 args.detect_error):
-                build_report.add_build(cp, recipe, build)
+    for cp in gc.projects(select=args.charms):
+        for (recipe, build) in cp.get_builds(set(args.channels), args.arch_tag,
+                                             args.detect_error):
+            build_report.add_build(cp, recipe, build)
 
     build_report.generate()
 
