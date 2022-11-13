@@ -17,7 +17,7 @@ import json
 import logging
 import subprocess
 import tempfile
-from typing import (Any, Dict, List, Tuple, IO, Optional, Set)
+from typing import (Any, Dict, Generator, List, Tuple, IO, Optional, Set)
 import sys
 import time
 
@@ -872,31 +872,17 @@ class CharmProject:
                    channel: str = None,
                    arch_tag: str = None,
                    detect_error: bool = False
-                   ) -> Dict[str, Dict[str, Dict[str, Any]]]:
+                   ) -> Generator[Tuple[TypeLPObject, TypeLPObject],
+                                  None, None]:
         """Get the builds associated to a charm.
 
-        The builds are organized in a dictionary where the key is the recipe's
-        name that holds another dictionary that uses the <series>/<arch>
-        string as the key and its value is a dictionary with the relevant
-        attributes.
-
-        Example:
-
-        {'charm-nova-compute.master.latest': {
-            'focal/amd64': {
-                'datebuild': <datetime.datetime instance>,
-                'store_channels': ['latest/edge'],
-                'buildstate': 'Successfully built',
-                'build_log_url': 'https://launchpadlibrarian.net/58295/...',
-                'error_detected': <list of errors found in the log>
-                }
-            }
-        }
+        This method yields a tuple with the recipe and the build objects.
 
         :param channel: filter list of builds by channel (e.g. 'latest/edge')
         :param arch_tag: filter list of build by architecture (e.g. 'amd64')
         :param detect_error: Attempt to found errors in the building log when
                              the built was not successful.
+        :returns: a generator with the all builds found.
         """
         lp_recipes = self.lpt.get_charm_recipes(self.lp_team, self.lp_project)
         builds = collections.defaultdict(dict)
@@ -925,31 +911,8 @@ class CharmProject:
                         (date and
                          builds[recipe.name][series_arch]['datebuilt'] < date
                          )):
-                    error_detected = None
-                    if detect_error and build.buildstate != BUILD_SUCCESSFUL:
-                        log_url = build.build_log_url
-                        try:
-                            error_detected = self._detect_error(log_url)
-                        except Exception:
-                            logger.warn(f'Not able to detect error: {log_url}')
 
-                    logger.debug((f'Adding {recipe.name}/{series_arch} to the '
-                                  f'list of builds'))
-                    builds[recipe.name][series_arch] = {
-                        'datebuilt': build.datebuilt,
-                        'store_channels': recipe.store_channels,
-                        'buildstate': build.buildstate,
-                        'build_log_url': build.build_log_url,
-                        'error_detected': error_detected,
-                        'revision': build.revision_id,
-                        'store_upload_revision': build.store_upload_revision,
-                        'store_upload_status': build.store_upload_status,
-                        'store_upload_error_message':
-                            build.store_upload_error_message,
-                        'web_link': build.web_link,
-                        'recipe_web_link': recipe.web_link,
-                    }
-        return builds
+                    yield recipe, build
 
     @staticmethod
     def _detect_error(url: str) -> List[str]:

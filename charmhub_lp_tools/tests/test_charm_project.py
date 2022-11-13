@@ -31,6 +31,9 @@ class TestCharmProject(BaseTest):
              }
         )
 
+    def test_get_builds(self):
+        self.project.get_builds(['yoga/edge', 'latest/edge'])
+
 
 class TestCharmChannel(BaseTest):
     def test_decode_channel_map(self):

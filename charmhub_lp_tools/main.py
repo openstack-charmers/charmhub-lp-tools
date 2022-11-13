@@ -46,8 +46,6 @@ import argparse
 import collections
 import collections.abc
 import logging
-import json
-import operator
 import os
 import pathlib
 import pprint
@@ -61,11 +59,6 @@ try:
 except ImportError:
     from backports.zoneinfo import ZoneInfo
 
-import humanize
-
-from jinja2 import Environment, FileSystemLoader, select_autoescape
-from prettytable import PrettyTable
-
 from .launchpadtools import (
     LaunchpadTools,
     setup_logging as lpt_setup_logging,
@@ -75,8 +68,11 @@ from .charm_project import (
     CharmProject,
     setup_logging as cp_setup_logging,
 )
-
 from .charmhub import setup_logging as ch_setup_logging
+from .reports import (
+    get_builds_report_klass,
+    get_supported_report_types,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -296,7 +292,7 @@ def parse_args(config_from_file: FileConfig) -> argparse.Namespace:
                         dest='format',
                         metavar='FORMAT',
                         type=str,
-                        choices=['plain', 'json', 'html'],
+                        choices=get_supported_report_types(),
                         default='plain',
                         help='Specify the output format')
     parser.add_argument('-i', '--ignore-errors',
@@ -418,9 +414,9 @@ def parse_args(config_from_file: FileConfig) -> argparse.Namespace:
               'repeated for multiple channels.'),
     )
     check_builds_commands.add_argument(
-        '-o', '--output', metavar='DIR', dest='output_dir',
-        default='report',
-        help='Write report to DIR.'
+        '-o', '--output', metavar='OUTPUT', dest='output',
+        default='./report',
+        help='Write report to OUTPUT.'
     )
     check_builds_commands.set_defaults(func=check_builds_main)
     # authorize helper
@@ -684,124 +680,15 @@ def check_builds_main(args: argparse.Namespace,
     :param args: the arguments parsed from the command line.
     :param gc: The GroupConfig; i.e. all the charms and their config.
     """
-    t = PrettyTable()
-    cols = ['Recipe Name', 'Channels', 'Arch', 'State', 'Age', 'Revision',
-            'Store Rev', 'Build Log']
-    if args.detect_error:
-        cols.append('Error')
-
-    os.makedirs(args.output_dir, exist_ok=True)
-
-    t.field_names = cols
-    t.align = 'l'  # align to the left.
-    # {'openstack': {'yoga': {'edge': 'yoga-edge.html'}}}
-    reports = collections.defaultdict(lambda: collections.defaultdict(dict))
-    __cached_cp = {}
+    klass = get_builds_report_klass(args.format)
+    build_report = klass(args.output)
     for channel in args.channels:
-        (track, risk) = channel.split('/')
-        fname = f'{track}-{risk}.html'
-        all_builds = {}
-        for cp_ in gc.projects(select=args.charms):
-            if cp_.charmhub_name not in __cached_cp:
-                __cached_cp[cp_.charmhub_name] = cp_
-            cp = __cached_cp[cp_.charmhub_name]
-            if args.format == 'plain':
-                print(f"Looking at charm: {cp.charmhub_name}")
-            builds = cp.get_builds(channel, args.arch_tag, args.detect_error)
+        for cp in gc.projects(select=args.charms):
+            for (recipe, build) in cp.get_builds(channel, args.arch_tag,
+                                                 args.detect_error):
+                build_report.add_build(cp, recipe, build)
 
-            if args.format == 'plain':
-                table_builds_add_rows(t, builds, args.detect_error)
-            elif args.format == 'json':
-                print(json.dumps(builds, default=str))
-            elif args.format == 'html' and builds:
-                all_builds[cp.charmhub_name] = {'builds': builds,
-                                                'charm_project': cp}
-                reports[cp.project_group][track][risk] = fname
-
-        if args.format == 'html':
-            logger.debug('Generating html report.')
-            content = gen_html_report_for_builds(all_builds)
-            report_file = os.path.join(args.output_dir, fname)
-            logger.info('writing html report to %s for channel %s',
-                        report_file, channel)
-            with open(report_file, 'w') as f:
-                content.dump(f)
-                f.write('\n')
-
-    if args.format == 'plain':
-        print(t.get_string(sort_key=operator.itemgetter(0, 1, 2),
-                           sortby="Recipe Name"))
-    elif args.format == 'html':
-        # generate index.
-        content = gen_html_report_index(reports)
-        with open(os.path.join(args.output_dir, 'index.html'), 'w') as f:
-            logger.info('Writing html report index to %s', f.name)
-            content.dump(f)
-            f.write('\n')
-
-
-def gen_html_report_index(reports: Dict[str, Dict[str, Dict[str, str]]]):
-    """
-    Generate index of reports produced.
-    """
-    env = _get_jinja2_env()
-    template = env.get_template('index.html.j2')
-    return template.stream({'reports': reports,
-                            'NOW': NOW})
-
-
-def gen_html_report_for_builds(all_builds):
-    env = _get_jinja2_env()
-    template = env.get_template('all_builds.html.j2')
-    return template.stream({'all_builds': all_builds,
-                            'NOW': NOW})
-
-
-def _get_jinja2_env():
-    return Environment(
-        loader=FileSystemLoader([os.path.join(__THIS__, 'templates')]),
-        extensions=["jinja2_humanize_extension.HumanizeExtension"],
-        autoescape=select_autoescape()
-    )
-
-
-def table_builds_add_rows(t: PrettyTable,
-                          builds: Dict[str, Dict[str, Dict[str, Any]]],
-                          detect_error: Any):
-    """Print builds in plain text format."""
-
-    for recipe_name, arch_build in builds.items():
-        for arch_name, build in arch_build.items():
-            age = humanize.naturaltime(build['datebuilt'], when=NOW)
-            if build['buildstate'] != 'Successfully built':
-                build_log = build['build_log_url']
-            else:
-                build_log = ''
-
-            try:
-                # git commit hash short version
-                revision = build['revision'][:7]
-            except Exception:
-                logger.debug((f'Cannot get git commit hash short version: '
-                              f'{build["revision"]}'))
-                revision = None
-            if build['store_upload_status'] == 'Uploaded':
-                store_rev = build['store_upload_revision']
-            else:
-                store_rev = build['store_upload_error_message']
-            row = [
-                recipe_name, ', '.join(build['store_channels']), arch_name,
-                build['buildstate'], age, revision,
-                store_rev,
-                build_log,
-            ]
-
-            if detect_error:
-                if build['error_detected']:
-                    row.append('\n'.join(build['error_detected']))
-                else:
-                    row.append('')
-            t.add_row(row)
+    build_report.generate()
 
 
 def authorize_main(args: argparse.Namespace,
