@@ -53,12 +53,13 @@
             </div>
           </td>
           <td>
-            {%- if build.revision %}
-              {%- if value.charm_project.repository[-4:] == '.git' %}
-                <a href="{{ value.charm_project.repository[:-4] }}/commit/{{ build.revision }}">{{ build.revision[:7] }}</a>
+            {%- if build.revision_id %}
+              {%- if charm_project.repository[-4:] == '.git' %}
+                {%- set repository_url = charm_project.repository[-4:] %}
               {%- else %}
-                <a href="{{ value.charm_project.repository }}/commit/{{ build.revision }}">{{ build.revision[:7] }}</a>
+                {%- set repository_url = charm_project.repository %}
               {% endif %}
+              <a href="{{ repository_url }}/commit/{{ build.revision_id }}">{{ build.revision_id[:7] }}</a>
             {%- else %}
               None
             {%- endif %}
