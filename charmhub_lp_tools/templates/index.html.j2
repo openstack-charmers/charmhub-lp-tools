@@ -8,8 +8,8 @@
   <div class="l-site">
     <div class="u-fixed-width">
       <ul class="p-matrix">
-      {%- for project, tracks in reports|items %}
-        {%- for track, risks in tracks|items %}
+      {%- for project, tracks in reports|dictsort %}
+        {%- for track, risks in tracks|dictsort %}
           <li class="p-matrix__item">
             {%- if project == 'openstack' %}
               <img class="p-matrix__img" src="https://assets.ubuntu.com/v1/a7916513-picto-openstack.svg" alt="" />
