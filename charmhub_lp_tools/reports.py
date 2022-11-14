@@ -123,7 +123,6 @@ class PlainBuildsReport(BaseBuildsReport):
     def add_build(self, charm_project, recipe, build):
         build_arch_tag = build.distro_arch_series.architecture_tag
         series_arch = f'{build.distro_series.name}/{build_arch_tag}'
-        age = humanize.naturaltime(build.datebuilt, when=NOW)
         if build.buildstate != 'Successfully built':
             build_log = build.build_log_url
         else:
@@ -131,10 +130,10 @@ class PlainBuildsReport(BaseBuildsReport):
 
         try:
             # git commit hash short version
-            revision = build.revision[:7]
+            revision = build.revision_id[:7]
         except Exception:
             self.log.debug('Cannot get git commit hash short version: %s',
-                           build.revision)
+                           build.revision_id)
             revision = None
 
         if build.store_upload_status == 'Uploaded':
@@ -144,10 +143,10 @@ class PlainBuildsReport(BaseBuildsReport):
 
         row = [
             recipe.name,
-            ', '.join(build.store_channels),
+            ', '.join(recipe.store_channels),
             series_arch,
             build.buildstate,
-            age,
+            humanize.naturaltime(build.datebuilt, when=NOW),
             revision,
             store_rev,
             build_log,
