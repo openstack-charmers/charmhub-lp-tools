@@ -886,7 +886,7 @@ class CharmProject:
         """
         lp_recipes = self.lpt.get_charm_recipes(self.lp_team, self.lp_project)
         builds = collections.defaultdict(dict)
-        for recipe in lp_recipes:
+        for recipe in sorted(lp_recipes, key=lambda x: x.name):
             if (channels and
                     not channels.intersection(set(recipe.store_channels))):
                 logger.debug((f'Skipping recipe {recipe.name}, because '
@@ -894,6 +894,13 @@ class CharmProject:
                 continue
 
             logger.debug(f'Getting builds for recipe {recipe.name}')
+            # single revision will generate one or more builds, the list of
+            # builds returned by LP is sorted in descending order, so we only
+            # care about the first revision of the list and all the builds
+            # associated with that revision, once a new revision shows up, we
+            # know they are old builds and have been superseded by newer
+            # commits, so we can short circuit the loop.
+            _revision = None
             for build in recipe.builds:
                 build_arch_tag = build.distro_arch_series.architecture_tag
                 if arch_tag and arch_tag != build_arch_tag:
@@ -902,23 +909,23 @@ class CharmProject:
                     continue
 
                 series_arch = f'{build.distro_series.name}/{build_arch_tag}'
-                logger.info((f'Found build of {recipe.name} for {series_arch} '
-                             f'in {recipe.store_channels}'))
+                logger.info(
+                    'Found build of %s for %s in %s (%s)',
+                    recipe.name, series_arch, recipe.store_channels,
+                    build.revision_id[:7] if build.revision_id else None
+                )
                 date = build.datebuilt
+                if _revision and _revision != build.revision_id:
+                    logger.debug(
+                        'Breaking loop, because revision changed (%s != %s)',
+                        _revision, build.revision_id
+                    )
+                    break
+                _revision = build.revision_id
                 if (series_arch not in builds[recipe.name] or
                         (date and
                          builds[recipe.name][series_arch]['datebuilt'] < date
                          )):
-                    # TODO: the builds are sorted in descending order of
-                    # finishing (or starting if not completed successfully),
-                    # at some point there is no reason to keep iterating the
-                    # builds, because we only care about the last (newest)
-                    # build per base+arch, but we don't know what bases are
-                    # the ones we are looking for, also for the case of
-                    # architectures, if the charm is not a "binary charm",
-                    # then find amd64 is enough.  This optimization is
-                    # specially needed by latest/edge channel which contains
-                    # many builds.
                     yield recipe, build
 
     @staticmethod
