@@ -71,6 +71,7 @@ from .charm_project import (
 from .charmhub import setup_logging as ch_setup_logging
 from .reports import (
     get_builds_report_klass,
+    get_charmhub_report_klass,
     get_supported_report_types,
 )
 
@@ -548,6 +549,23 @@ def parse_args(config_from_file: FileConfig) -> argparse.Namespace:
         help='Retry calls when charmhub issues a 504 error',
     )
     copy_channel_command.set_defaults(func=copy_channel)
+    # charmhub-report
+    ch_report_commands = subparser.add_parser(
+        'charmhub-report',
+        help='Generate a report based on the published charms in Charmhub.')
+    ch_report_commands.add_argument(
+        '--track',
+        dest='tracks',
+        action='append',
+        metavar='TRACK',
+        help='Select only tracks that match TRACK',
+    )
+    ch_report_commands.add_argument(
+        '-o', '--output', metavar='OUTPUT', dest='output',
+        default=None,
+        help='Write report to OUTPUT.'
+    )
+    ch_report_commands.set_defaults(func=ch_report_main)
 
     args = parser.parse_args()
     return args
@@ -763,6 +781,43 @@ def copy_channel(args: argparse.Namespace,
                                    retries=args.retries)
             cp_revs[cp.charmhub_name] = cp_revs[cp.charmhub_name].union(revs)
     return cp_revs
+
+
+def ch_report_main(args: argparse.Namespace,
+                   gc: GroupConfig,
+                   ):
+    """Generate report of published charms.
+
+    :param args: the arguments parsed from the command line.
+    :para gc: The GroupConfig; i.e. all the charms and their config.
+    """
+    klass = get_charmhub_report_klass(args.format)
+    report = klass(args.output)
+    for track in args.tracks:
+        for cp in gc.projects(select=args.charms):
+            # if the charm doesn't declare its use of the track, then we skip
+            # it.
+            if track not in cp.tracks:
+                logger.debug('Skipping %s since it does not use track %s',
+                             cp.charmhub_name, track)
+                continue
+            for risk in ['edge', 'beta', 'candidate', 'stable']:
+                channel = CharmChannel(cp, f'{track}/{risk}')
+                # get all the revisions, without filtering by base nor arch.
+                revs_found = 0
+                for channel_def in channel.channel_map:
+                    if (channel_def['channel']['track'],
+                            channel_def['channel']['risk']) == (track, risk):
+                        report.add_revision(channel, channel_def)
+                        revs_found += 1
+                if revs_found == 0:
+                    # add a fake revision to force the inclusion in the list
+                    # of charms of the final report.
+                    report.add_revision(channel, {})
+                logger.info('Found %s charm revisions for %s in %s/%s',
+                            revs_found, cp.charmhub_name, track, risk)
+
+    report.generate()
 
 
 def setup_logging(loglevel: str) -> None:

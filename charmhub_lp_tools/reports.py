@@ -1,12 +1,18 @@
 import abc
 import collections
+import io
 import json
 import logging
 import operator
 import os
+import sys
 
 from datetime import datetime
-from typing import List
+from typing import (
+    List,
+    Optional,
+    Union,
+)
 try:
     from zoneinfo import ZoneInfo
 except ImportError:
@@ -17,6 +23,7 @@ import humanize
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from prettytable import PrettyTable
 
+from .charm_project import CharmChannel
 from .launchpadtools import TypeLPObject
 from .parsers import parse_channel
 
@@ -24,7 +31,24 @@ from .parsers import parse_channel
 NOW = datetime.now(tz=ZoneInfo("UTC"))
 
 
-class BaseBuildsReport(abc.ABC):
+class BaseReport(abc.ABC):
+    @property
+    def templates_dirs(self):
+        """List of directories that contain templates."""
+        return [
+            os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         'templates'),
+        ]
+
+    def _get_jinja2_env(self):
+        return Environment(
+            loader=FileSystemLoader(self.templates_dirs),
+            extensions=["jinja2_humanize_extension.HumanizeExtension"],
+            autoescape=select_autoescape()
+        )
+
+
+class BaseBuildsReport(BaseReport):
     """Base class report"""
 
     def __init__(self, output: str = None):
@@ -58,14 +82,6 @@ class HtmlBuildsReport(BaseBuildsReport):
                 )
             )
         )
-
-    @property
-    def templates_dirs(self):
-        """List of directories that contain templates."""
-        return [
-            os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                         'templates'),
-        ]
 
     def add_build(self, charm_project, recipe, build):
         # the same build could have been used to be released into multiple
@@ -113,13 +129,6 @@ class HtmlBuildsReport(BaseBuildsReport):
             self.log.info('Writing html report index to %s', f.name)
             content.dump(f)
             f.write('\n')
-
-    def _get_jinja2_env(self):
-        return Environment(
-            loader=FileSystemLoader(self.templates_dirs),
-            extensions=["jinja2_humanize_extension.HumanizeExtension"],
-            autoescape=select_autoescape()
-        )
 
 
 class PlainBuildsReport(BaseBuildsReport):
@@ -195,10 +204,155 @@ class JSONBuildsReport(BaseBuildsReport):
         print(json.dumps(self.builds, default=str))
 
 
+class BaseCharmhubReport(BaseReport):
+    """Base Charmhub report class."""
+
+    def __init__(self, output: Optional[Union[str, io.RawIOBase]]):
+        self.output = output if output else self.DEFAULT_OUTPUT
+        self.log = logging.getLogger(f'{__name__}.{self.__class__.__name__}')
+        # {'openstack': {'yoga': {'keystone': {'edge': [<rev>, <rev>,...]}}}
+        self.revisions = collections.defaultdict(     # project_group
+            lambda: collections.defaultdict(          # track
+                lambda: collections.defaultdict(      # charm name
+                    lambda: collections.defaultdict(  # risk
+                        list
+                    )
+                )
+            )
+        )
+
+    def add_revision(
+            self,
+            channel: CharmChannel,
+            revision: int,
+    ):
+        """Add new revision to the report."""
+        pg = channel.project.project_group
+        name = channel.project.charmhub_name
+        self.log.debug('Adding revision to list: [%s] %s (%s): %s',
+                       pg, name, channel.name, revision)
+        self.revisions[pg][channel.track][name][channel.risk].append(revision)
+
+    @abc.abstractmethod
+    def generate(self):
+        raise NotImplementedError()
+
+
+class HtmlCharmhubReport(BaseCharmhubReport):
+    """HTML Charmhub report class."""
+
+    DEFAULT_OUTPUT = "./report"
+
+    def generate(self):
+        reports_written = collections.defaultdict(dict)
+        os.makedirs(self.output, exist_ok=True)
+        env = self._get_jinja2_env()
+        template = env.get_template('charms_per_track.html.j2')
+        for project_group, tracks in self.revisions.items():
+            for track, charms in tracks.items():
+                content = template.stream({'charms': charms,
+                                           'track': track,
+                                           'project_group': project_group,
+                                           'NOW': NOW,
+                                           })
+                fname = f'{project_group}-{track}.html'
+                fpath = os.path.join(self.output, fname)
+                with open(fpath, 'w') as f:
+                    content.dump(f)
+                    f.write('\n')
+
+                reports_written[project_group][track] = fname
+
+        # generate index.
+        template = env.get_template('index_charms_per_track.html.j2')
+        content = template.stream({'reports': reports_written,
+                                   'NOW': NOW})
+
+        with open(os.path.join(self.output, 'index.html'), 'w') as f:
+            self.log.info('Writing html report index to %s', f.name)
+            content.dump(f)
+            f.write('\n')
+
+
+class JSONCharmhubReport(BaseCharmhubReport):
+    DEFAULT_OUTPUT = sys.stdout
+
+    def __init__(self, output: Optional[Union[str, io.RawIOBase]]):
+        if isinstance(output, str):
+            super().__init__(open(output, 'w'))
+        else:
+            super().__init__(output)
+
+    def generate(self):
+        print(json.dumps(self.revisions, default=str), file=self.output)
+
+
+class PlainCharmhubReport(BaseCharmhubReport):
+
+    DEFAULT_OUTPUT = sys.stdout
+
+    def __init__(self, output: Optional[Union[str, io.RawIOBase]]):
+        if isinstance(output, str):
+            super().__init__(open(output, 'w'))
+        else:
+            super().__init__(output)
+
+    def init_table(self):
+        """Initialize table.
+
+        :returns: a PrettyTable instance.
+        """
+        t = PrettyTable()
+        t.field_names = ['Charm',
+                         'Edge',
+                         'Beta',
+                         'Candidate',
+                         'Stable']
+        t.align = 'l'  # align to the left.
+        return t
+
+    def generate(self):
+        for project_group, tracks in self.revisions.items():
+            for track, charms in tracks.items():
+                pg_table = self.init_table()
+                pg_table.title = f'Group: {project_group} - Track: {track}'
+                for charm, risks in charms.items():
+                    row = [charm]
+                    for risk in ['edge', 'beta', 'candidate', 'stable']:
+                        if risk in risks:
+                            revs = []
+                            for channel_def in risks[risk]:
+                                if channel_def:
+                                    revision = channel_def['revision']
+                                    base = channel_def['channel']['base']
+                                    revs.append(
+                                        '%s (%s/%s)' % (
+                                            revision['revision'],
+                                            base['channel'],
+                                            base['architecture'],
+                                        )
+                                    )
+                                else:
+                                    revs.append('-')
+                            row.append('\n'.join(revs))
+                        else:
+                            row.append('-')
+                    pg_table.add_row(row)
+                print(pg_table.get_string(sort_key=operator.itemgetter(0),
+                                          sortby="Charm"),
+                      file=self.output if self.output else sys.stdout)
+
+
 _build_report_klasses = {
     'html': HtmlBuildsReport,
     'plain': PlainBuildsReport,
     'json': JSONBuildsReport,
+}
+
+_charmhub_report_klasses = {
+    'html': HtmlCharmhubReport,
+    'json': JSONCharmhubReport,
+    'plain': PlainCharmhubReport,
 }
 
 
@@ -209,6 +363,15 @@ def get_builds_report_klass(kind: str) -> BaseBuildsReport:
     :returns: a report class.
     """
     return _build_report_klasses[kind]
+
+
+def get_charmhub_report_klass(kind: str) -> BaseCharmhubReport:
+    """Get a report class for a kind of output.
+
+    :param kind: type of output report.
+    :returns: a report class.
+    """
+    return _charmhub_report_klasses[kind]
 
 
 def get_supported_report_types() -> List[str]:

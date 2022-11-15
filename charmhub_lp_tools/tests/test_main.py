@@ -1,3 +1,7 @@
+import os
+import shutil
+import tempfile
+
 import requests_mock
 
 from unittest import mock
@@ -38,3 +42,40 @@ class TestCopyChannel(BaseTest):
             revs = main.copy_channel(self.args, self.gc)
             self.assertIn('awesome', revs)
             self.assertEqual(revs['awesome'], {96, 93, 94, 95})
+
+
+class TestCharmhubReport(BaseTest):
+    def setUp(self):
+        super().setUp()
+        self.tmpdir = tempfile.mkdtemp(suffix='.ch-report')
+        self.args = mock.MagicMock()
+        self.args.charms = ['awesome']
+        self.args.tracks = ['foo', 'xena']
+        self.args.format = 'html'
+        self.args.output = self.tmpdir
+        self.gc = mock.MagicMock()
+        self.gc.projects.return_value = [self.project]
+
+    def tearDown(self):
+        super().tearDown()
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_ch_report_main(self):
+        with requests_mock.Mocker() as m:
+            m.get(CharmChannel.INFO_URL.format(charm='awesome'),
+                  json=self.awesome_info)
+            main.ch_report_main(self.args, self.gc)
+
+        self.assertEqual(sorted(os.listdir(self.tmpdir)),
+                         sorted(['index.html', 'openstack-xena.html']))
+
+        with open(os.path.join(self.tmpdir, 'openstack-xena.html'), 'r') as f:
+            report_content = f.read()
+            self.assertIn('awesome', report_content)
+            self.assertIn('80 (20.04/amd64)', report_content)
+            self.assertIn('80 (20.04/arm64)', report_content)
+            self.assertIn('80 (20.04/ppc64el)', report_content)
+            self.assertIn('80 (20.04/s390x)', report_content)
+
+        with open(os.path.join(self.tmpdir, 'index.html'), 'r') as f:
+            self.assertIn('href="openstack-xena.html"', f.read())

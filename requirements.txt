@@ -16,3 +16,5 @@ charmcraft<3.0  # stick to the 2.x series
 # to generate html reports
 Jinja2
 jinja2-humanize-extension
+requests
+requests-cache
