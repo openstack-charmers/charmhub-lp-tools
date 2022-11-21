@@ -17,6 +17,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from prettytable import PrettyTable
 
 from .launchpadtools import TypeLPObject
+from .parsers import parse_channel
 
 
 __THIS__ = os.path.dirname(os.path.abspath(__file__))
@@ -59,7 +60,7 @@ class HtmlBuildsReport(BaseBuildsReport):
         # the same build could have been used to be released into multiple
         # channels.
         for channel in recipe.store_channels:
-            (track, risk) = channel.split('/')
+            (track, risk) = parse_channel(channel)
             self.builds[charm_project.project_group][track][risk].append(
                 (charm_project, recipe, build)
             )
