@@ -1,3 +1,4 @@
+import abc
 import collections
 import json
 import logging
@@ -23,13 +24,15 @@ from .parsers import parse_channel
 NOW = datetime.now(tz=ZoneInfo("UTC"))
 
 
-class BaseBuildsReport:
+class BaseBuildsReport(abc.ABC):
     """Base class report"""
+
     def __init__(self, output: str = None):
         """Initialize base report."""
         self.output = output
         self.log = logging.getLogger(f'{__name__}.{self.__class__.__name__}')
 
+    @abc.abstractmethod
     def add_build(self, charm_project, recipe, build: TypeLPObject):
         """Add a new build object to the report.
 
@@ -38,6 +41,7 @@ class BaseBuildsReport:
         """
         raise NotImplementedError()
 
+    @abc.abstractmethod
     def generate(self):
         """Generate report."""
         raise NotImplementedError()
