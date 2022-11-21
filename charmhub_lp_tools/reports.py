@@ -20,7 +20,6 @@ from .launchpadtools import TypeLPObject
 from .parsers import parse_channel
 
 
-__THIS__ = os.path.dirname(os.path.abspath(__file__))
 NOW = datetime.now(tz=ZoneInfo("UTC"))
 
 
@@ -55,6 +54,14 @@ class HtmlBuildsReport(BaseBuildsReport):
                 )
             )
         )
+
+    @property
+    def templates_dirs(self):
+        """List of directories that contain templates."""
+        return [
+            os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         'templates'),
+        ]
 
     def add_build(self, charm_project, recipe, build):
         # the same build could have been used to be released into multiple
@@ -105,7 +112,7 @@ class HtmlBuildsReport(BaseBuildsReport):
 
     def _get_jinja2_env(self):
         return Environment(
-            loader=FileSystemLoader([os.path.join(__THIS__, 'templates')]),
+            loader=FileSystemLoader(self.templates_dirs),
             extensions=["jinja2_humanize_extension.HumanizeExtension"],
             autoescape=select_autoescape()
         )

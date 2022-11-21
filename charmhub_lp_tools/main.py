@@ -79,7 +79,6 @@ logger = logging.getLogger(__name__)
 
 LOGGING_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
 NOW = datetime.now(tz=ZoneInfo("UTC"))
-__THIS__ = os.path.dirname(os.path.abspath(__file__))
 
 
 class FileConfig(NamedTuple):
