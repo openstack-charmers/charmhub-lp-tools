@@ -213,13 +213,11 @@ class GroupConfig:
     def add_charm_project(self,
                           project_config: Dict[str, Any],
                           merge: bool = False,
-                          project_group: str = None,
                           ) -> None:
         """Add a CharmProject object from the project specification dict.
 
         :param project: the project to add.
         :param merge: if merge is True, merge/overwrite the existing object.
-        :param project_group: project group name this charm belongs to.
         :raises: ValueError if merge is false and the charm project already
             exists.
         """
