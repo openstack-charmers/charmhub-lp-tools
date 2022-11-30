@@ -162,7 +162,7 @@ class LaunchpadTools:
         :return: list of the configured charm recipes
         :rtype: list
         """
-        logger.info('Fetching charm recipes for target=%s', project.name)
+        logger.debug('Fetching charm recipes for target=%s', project.name)
         recipes = list(
             filter(lambda r: r.project_link == project.self_link,
                    self._charm_recipes(owner.self_link)))

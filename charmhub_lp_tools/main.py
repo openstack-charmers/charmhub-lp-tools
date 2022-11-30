@@ -46,8 +46,6 @@ import argparse
 import collections
 import collections.abc
 import logging
-import json
-import operator
 import os
 import pathlib
 import pprint
@@ -61,10 +59,6 @@ try:
 except ImportError:
     from backports.zoneinfo import ZoneInfo
 
-import humanize
-
-from prettytable import PrettyTable
-
 from .launchpadtools import (
     LaunchpadTools,
     setup_logging as lpt_setup_logging,
@@ -74,8 +68,11 @@ from .charm_project import (
     CharmProject,
     setup_logging as cp_setup_logging,
 )
-
 from .charmhub import setup_logging as ch_setup_logging
+from .reports import (
+    get_builds_report_klass,
+    get_supported_report_types,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -204,10 +201,13 @@ class GroupConfig:
                 group_config = yaml.safe_load(f)
             logger.debug('group_config is: \n%s', pprint.pformat(group_config))
             project_defaults = group_config.get('defaults', {})
+            # foo/bar/openstack.yaml -> openstack
+            project_group = os.path.splitext(os.path.basename(file))[0]
             for project in group_config.get('projects', []):
                 for key, value in project_defaults.items():
                     project.setdefault(key, value)
                 logger.debug('Loaded project %s', project.get('name'))
+                project['project_group'] = project_group
                 self.add_charm_project(project)
 
     def add_charm_project(self,
@@ -289,7 +289,7 @@ def parse_args(config_from_file: FileConfig) -> argparse.Namespace:
                         dest='format',
                         metavar='FORMAT',
                         type=str,
-                        choices=['plain', 'json'],
+                        choices=get_supported_report_types(),
                         default='plain',
                         help='Specify the output format')
     parser.add_argument('-i', '--ignore-errors',
@@ -404,7 +404,17 @@ def parse_args(config_from_file: FileConfig) -> argparse.Namespace:
         help='Look for the ERROR in the build log.')
     check_builds_commands.add_argument(
         '--channel',
-        help='Filter the builds by channel (e.g. latest/edge)')
+        dest='channels',
+        action='append',
+        metavar='CHANNEL',
+        help=('Filter the builds by channel (e.g. latest/edge). May be '
+              'repeated for multiple channels.'),
+    )
+    check_builds_commands.add_argument(
+        '-o', '--output', metavar='OUTPUT', dest='output',
+        default='./report',
+        help='Write report to OUTPUT.'
+    )
     check_builds_commands.set_defaults(func=check_builds_main)
     # authorize helper
     authorize_command = subparser.add_parser(
@@ -667,70 +677,14 @@ def check_builds_main(args: argparse.Namespace,
     :param args: the arguments parsed from the command line.
     :param gc: The GroupConfig; i.e. all the charms and their config.
     """
-    t = PrettyTable()
-    cols = ['Recipe Name', 'Channels', 'Arch', 'State', 'Age', 'Revision',
-            'Store Rev', 'Build Log']
-    if args.detect_error:
-        cols.append('Error')
-
-    t.field_names = cols
-    t.align = 'l'  # align to the left.
-
+    klass = get_builds_report_klass(args.format)
+    build_report = klass(args.output)
     for cp in gc.projects(select=args.charms):
-        if args.format == 'plain':
-            print(f"Looking at charm: {cp.charmhub_name}")
+        for (recipe, build) in cp.get_builds(set(args.channels), args.arch_tag,
+                                             args.detect_error):
+            build_report.add_build(cp, recipe, build)
 
-        builds = cp.get_builds(args.channel, args.arch_tag, args.detect_error)
-
-        if args.format == 'plain':
-            table_builds_add_rows(t, builds, args.detect_error)
-
-        elif args.format == 'json':
-            print(json.dumps(builds, default=str))
-        else:
-            raise ValueError(f'Unknown output format: {args.format}')
-    if args.format == 'plain':
-        print(t.get_string(sort_key=operator.itemgetter(0, 1, 2),
-                           sortby="Recipe Name"))
-
-
-def table_builds_add_rows(t: PrettyTable,
-                          builds: Dict[str, Dict[str, Dict[str, Any]]],
-                          detect_error: Any):
-    """Print builds in plain text format."""
-
-    for recipe_name, arch_build in builds.items():
-        for arch_name, build in arch_build.items():
-            age = humanize.naturaltime(build['datebuilt'], when=NOW)
-            if build['buildstate'] != 'Successfully built':
-                build_log = build['build_log_url']
-            else:
-                build_log = ''
-
-            try:
-                # git commit hash short version
-                revision = build['revision'][:7]
-            except Exception:
-                logger.debug((f'Cannot get git commit hash short version: '
-                              f'{build["revision"]}'))
-                revision = None
-            if build['store_upload_status'] == 'Uploaded':
-                store_rev = build['store_upload_revision']
-            else:
-                store_rev = build['store_upload_error_message']
-            row = [
-                recipe_name, ', '.join(build['store_channels']), arch_name,
-                build['buildstate'], age, revision,
-                store_rev,
-                build_log,
-            ]
-
-            if detect_error:
-                if build['error_detected']:
-                    row.append('\n'.join(build['error_detected']))
-                else:
-                    row.append('')
-            t.add_row(row)
+    build_report.generate()
 
 
 def authorize_main(args: argparse.Namespace,

@@ -1,6 +1,7 @@
 import os
 import subprocess
 
+from datetime import datetime
 from unittest import mock
 
 import requests_mock
@@ -30,6 +31,56 @@ class TestCharmProject(BaseTest):
              charm_project.CharmChannel(self.project, 'xena/edge'),
              }
         )
+
+    def test_get_builds(self):
+        with mock.patch.object(
+                self.project.lpt, 'get_charm_recipes'
+        ) as get_charm_recipes:
+            get_charm_recipes.return_value = self._gen_recipes_and_builds()
+
+            expected_total_builds = 8  # 1 build per arch (4) and branch (2).
+            num_total_builds = 0
+            for recipe, build in self.project.get_builds({'yoga/edge',
+                                                          'latest/edge'}):
+                num_total_builds += 1
+                # xena recipes should have been filtered out
+                self.assertNotIn('xena', recipe.name)
+
+            self.assertEqual(num_total_builds, expected_total_builds)
+
+    def _gen_recipes_and_builds(self):
+        recipes = []
+        for git_branch, store_channel in [
+                ('master', 'latest/edge'),
+                ('stable/yoga', 'yoga/edge'),
+                ('stable/xena', 'xena/edge')]:
+            recipe = mock.MagicMock()
+            recipe.name = (f'{self.project.charmhub_name}.'
+                           f'{git_branch.replace("/", "-")}.'
+                           f'{store_channel.split("/")[0]}')
+            recipe.store_channels = [store_channel]
+
+            builds = []
+            for revision_id, datebuilt in [
+                    ('11d5167158607b2211d14546b0a4f96952dfdb82',
+                     datetime(2022, 4, 27, 1, 0, 0)),
+                    ('6cbb9d7ed45fa395b1cc8d2f87fe90e3461b68de',
+                     datetime(2022, 4, 26, 2, 0, 0)),
+                    ('bb4dad842d7d36af1ea422fb828249e012143230',
+                     datetime(2022, 4, 25, 3, 0, 0)),
+                    (None,
+                     None)]:
+                for arch in ['s390x', 'amd64', 'ppc64el', 'arm64']:
+                    build = mock.MagicMock()
+                    build.distro_arch_series._architecture_tag = arch
+                    build.distro_series.name = 'jammy'
+                    build.revision_id = revision_id
+                    build.datebuilt = datebuilt
+                    builds.append(build)
+
+            recipe.builds = builds
+            recipes.append(recipe)
+        return recipes
 
 
 class TestCharmChannel(BaseTest):

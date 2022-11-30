@@ -17,7 +17,7 @@ import json
 import logging
 import subprocess
 import tempfile
-from typing import (Any, Dict, List, Tuple, IO, Optional, Set)
+from typing import (Any, Dict, Generator, List, Tuple, IO, Optional, Set)
 import sys
 import time
 
@@ -333,6 +333,7 @@ class CharmProject:
         self.launchpad_project: str = config.get('launchpad')  # type: ignore
         self._lp_project = None
         self.repository: str = config.get('repository')  # type: ignore
+        self.project_group: str = config.get('project_group')  # type: ignore
         self._lp_repo = None
         self._channels = None  # type: Set
 
@@ -867,45 +868,39 @@ class CharmProject:
                           file=file)
 
     def get_builds(self,
-                   channel: str = None,
+                   channels: Set[str] = None,
                    arch_tag: str = None,
                    detect_error: bool = False
-                   ) -> Dict[str, Dict[str, Dict[str, Any]]]:
+                   ) -> Generator[Tuple[TypeLPObject, TypeLPObject],
+                                  None, None]:
         """Get the builds associated to a charm.
 
-        The builds are organized in a dictionary where the key is the recipe's
-        name that holds another dictionary that uses the <series>/<arch>
-        string as the key and its value is a dictionary with the relevant
-        attributes.
+        This method yields a tuple with the recipe and the build objects.
 
-        Example:
-
-        {'charm-nova-compute.master.latest': {
-            'focal/amd64': {
-                'datebuild': <datetime.datetime instance>,
-                'store_channels': ['latest/edge'],
-                'buildstate': 'Successfully built',
-                'build_log_url': 'https://launchpadlibrarian.net/58295/...',
-                'error_detected': <list of errors found in the log>
-                }
-            }
-        }
-
-        :param channel: filter list of builds by channel (e.g. 'latest/edge')
+        :param channels: filter list of builds by a set of channels (e.g.
+                         'foo/edge', 'latest/edge')
         :param arch_tag: filter list of build by architecture (e.g. 'amd64')
         :param detect_error: Attempt to found errors in the building log when
                              the built was not successful.
+        :returns: a generator with the all builds found.
         """
         lp_recipes = self.lpt.get_charm_recipes(self.lp_team, self.lp_project)
         builds = collections.defaultdict(dict)
-        for recipe in lp_recipes:
-
-            if channel and channel not in recipe.store_channels:
+        for recipe in sorted(lp_recipes, key=lambda x: x.name):
+            if (channels and
+                    not channels.intersection(set(recipe.store_channels))):
                 logger.debug((f'Skipping recipe {recipe.name}, because '
-                              f'"{channel}" not in {recipe.store_channels}'))
+                              f'"{channels}" not in {recipe.store_channels}'))
                 continue
 
             logger.debug(f'Getting builds for recipe {recipe.name}')
+            # single revision will generate one or more builds, the list of
+            # builds returned by LP is sorted in descending order, so we only
+            # care about the first revision of the list and all the builds
+            # associated with that revision, once a new revision shows up, we
+            # know they are old builds and have been superseded by newer
+            # commits, so we can short circuit the loop.
+            _revision = None
             for build in recipe.builds:
                 build_arch_tag = build.distro_arch_series.architecture_tag
                 if arch_tag and arch_tag != build_arch_tag:
@@ -914,36 +909,24 @@ class CharmProject:
                     continue
 
                 series_arch = f'{build.distro_series.name}/{build_arch_tag}'
-                logger.info((f'Found build of {recipe.name} for {series_arch} '
-                             f'in {recipe.store_channels}'))
+                logger.info(
+                    'Found build of %s for %s in %s (%s)',
+                    recipe.name, series_arch, recipe.store_channels,
+                    build.revision_id[:7] if build.revision_id else None
+                )
                 date = build.datebuilt
+                if _revision and _revision != build.revision_id:
+                    logger.debug(
+                        'Breaking loop, because revision changed (%s != %s)',
+                        _revision, build.revision_id
+                    )
+                    break
+                _revision = build.revision_id
                 if (series_arch not in builds[recipe.name] or
                         (date and
                          builds[recipe.name][series_arch]['datebuilt'] < date
                          )):
-                    error_detected = None
-                    if detect_error and build.buildstate != BUILD_SUCCESSFUL:
-                        log_url = build.build_log_url
-                        try:
-                            error_detected = self._detect_error(log_url)
-                        except Exception:
-                            logger.warn(f'Not able to detect error: {log_url}')
-
-                    logger.debug((f'Adding {recipe.name}/{series_arch} to the '
-                                  f'list of builds'))
-                    builds[recipe.name][series_arch] = {
-                        'datebuilt': build.datebuilt,
-                        'store_channels': recipe.store_channels,
-                        'buildstate': build.buildstate,
-                        'build_log_url': build.build_log_url,
-                        'error_detected': error_detected,
-                        'revision': build.revision_id,
-                        'store_upload_revision': build.store_upload_revision,
-                        'store_upload_status': build.store_upload_status,
-                        'store_upload_error_message':
-                            build.store_upload_error_message,
-                    }
-        return builds
+                    yield recipe, build
 
     @staticmethod
     def _detect_error(url: str) -> List[str]:

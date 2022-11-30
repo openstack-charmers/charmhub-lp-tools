@@ -16,7 +16,7 @@ jobs:
         sudo snap install --dangerous ${{ steps.build.outputs.snap }}
         charmhub-lp-tool --help
     - id: publish
-      if: ${{ github.event_name == 'push' }}
+      if: github.ref == 'refs/heads/main'
       uses: snapcore/action-publish@v1
       with:
         # See: https://github.com/snapcore/action-publish#store-login
