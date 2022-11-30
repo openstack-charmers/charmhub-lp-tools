@@ -2,7 +2,7 @@ from typing import Tuple
 
 from charmhub_lp_tools.constants import (
     LIST_OF_RISKS,
-    Risks,
+    Risk,
 )
 
 
@@ -25,6 +25,6 @@ def parse_channel(value: str) -> Tuple[str, str]:
 
     if value not in LIST_OF_RISKS:
         # it's a track-only value, so we assume 'stable' risk.
-        return (value, Risks.STABLE.value)
+        return (value, Risk.STABLE.value)
 
     raise ValueError('Could not parse %s' % value)
