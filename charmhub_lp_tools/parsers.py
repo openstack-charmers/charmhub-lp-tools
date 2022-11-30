@@ -4,6 +4,7 @@ from charmhub_lp_tools.constants import (
     LIST_OF_RISKS,
     Risk,
 )
+from charmhub_lp_tools.exceptions import InvalidRiskLevel
 
 
 def parse_channel(value: str) -> Tuple[str, str]:
@@ -19,6 +20,8 @@ def parse_channel(value: str) -> Tuple[str, str]:
     try:
         # track/risk
         (track, risk) = value.split('/')
+        if risk not in LIST_OF_RISKS:
+            raise InvalidRiskLevel(f'Invalid risk: {risk}')
         return (track, risk)
     except ValueError:
         pass

@@ -1,5 +1,6 @@
 import unittest
 
+from charmhub_lp_tools.exceptions import InvalidRiskLevel
 from charmhub_lp_tools import parsers
 
 
@@ -11,3 +12,6 @@ class TestParseChannel(unittest.TestCase):
                                 ]:
             self.assertEqual(parsers.parse_channel(value),
                              expected)
+
+    def test_invalid_risk_level(self):
+        self.assertRaises(InvalidRiskLevel, parsers.parse_channel, 'foo/bar')
