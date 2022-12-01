@@ -25,6 +25,7 @@ from contextlib import suppress
 
 import lazr.restfulclient.errors
 import requests
+import requests_cache
 
 from tenacity import (
     Retrying,
@@ -53,6 +54,7 @@ CHARMCRAFT_ERROR_504 = ('Issue encountered while processing your request: '
                         '[504] Gateway Time-out.')
 
 logger = logging.getLogger(__name__)
+requests_session = requests_cache.CachedSession(':memory:')
 
 
 def setup_logging(loglevel: str) -> None:
@@ -120,7 +122,7 @@ class CharmChannel:
     @property
     def raw_charm_info(self):
         if not self._raw_charm_info:
-            self._raw_charm_info = requests.get(
+            self._raw_charm_info = requests_session.get(
                 self.INFO_URL.format(charm=self.project.charmhub_name)
             )
         return self._raw_charm_info
@@ -204,7 +206,7 @@ class CharmChannel:
                       for v in revision['bases']]
 
             if (
-                    base_chan == base and
+                    (base is None or base_chan == base) and
                     (chan_track, chan_risk) == (self.track, self.risk) and
                     (arch is None or arch in arches)
             ):
@@ -379,6 +381,10 @@ class CharmProject:
                     self._channels.add(CharmChannel(self, channel))
 
         return self._channels
+
+    @property
+    def tracks(self) -> Set[str]:
+        return set([c.track for c in self.channels])
 
     @property
     def lp_team(self) -> TypeLPObject:

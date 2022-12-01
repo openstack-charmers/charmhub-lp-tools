@@ -22,6 +22,7 @@ branches:
   stable/xena:
     channels:
       - xena/edge
+project_group: openstack
 """
 CHARM_CONFIG = yaml.safe_load(CHARM_CONFIG_STR)
 
