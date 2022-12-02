@@ -53,7 +53,7 @@ import sys
 import yaml
 
 from datetime import datetime
-from typing import (Any, Dict, Iterator, List, Optional, NamedTuple, Set)
+from typing import (Any, Dict, Iterator, List, Optional, NamedTuple)
 try:
     from zoneinfo import ZoneInfo
 except ImportError:
@@ -479,6 +479,7 @@ def parse_args(config_from_file: FileConfig) -> argparse.Namespace:
               'should really submit the requests to Launchpad.')
     )
     request_build_command.set_defaults(func=request_build)
+
     # request-code-import helper
     request_code_import_command = subparser.add_parser(
         'request-code-import',
@@ -493,6 +494,7 @@ def parse_args(config_from_file: FileConfig) -> argparse.Namespace:
               'should really submit the requests to Launchpad.')
     )
     request_code_import_command.set_defaults(func=request_code_import)
+
     # copy-channel
     copy_channel_command = subparser.add_parser(
         'copy-channel',
@@ -536,10 +538,18 @@ def parse_args(config_from_file: FileConfig) -> argparse.Namespace:
               'Can be used multiple times.')
     )
     copy_channel_command.add_argument(
+        '--ignore-arch',
+        dest='ignore_arches',
+        action='append',
+        metavar='IGNORE_ARCH',
+        type=str,
+        help='Architecture to ignore/not copy; repeat for multiple arches'
+    )
+    copy_channel_command.add_argument(
         '--force',
         dest='force',
         action='store_true',
-        help='Force the copy of charms for undefined channels in the config.'
+        help='Force copying revision into channel.'
     )
     copy_channel_command.add_argument(
         '--retries', metavar='N',
@@ -567,6 +577,154 @@ def parse_args(config_from_file: FileConfig) -> argparse.Namespace:
     )
     ch_report_commands.set_defaults(func=ch_report_main)
 
+    # clean-channel
+    clean_channel_command = subparser.add_parser(
+        'clean-channel',
+        help=('Clean a channel (track/risk) by specifying the base(s) to '
+              'keep. This will find the relevant revisions for those bases, '
+              'then close the channel, and finally re-release the revisions '
+              'back to that channel. NOTE: this is quite dangerous - use '
+              'sparingly!.'),
+    )
+    clean_channel_command.add_argument(
+        '--i-really-mean-it',
+        dest='confirmed',
+        action='store_true',
+        default=False,
+        help=('This flag must be supplied to indicate that the operation '
+              'should really commit the changes.')
+    )
+    clean_channel_command.add_argument(
+        '-s', '--source', dest='src_channel',
+        metavar='CHANNEL', required=True,
+        help='The channel to clean.',
+    )
+    clean_channel_command.add_argument(
+        '--base',
+        dest='bases',
+        action='append',
+        metavar='BASE',
+        required=True,
+        type=str,
+        help=('Select charm(s) that run on the base (e.g. 20.04, 22.04). '
+              'Can be used multiple times.')
+    )
+    clean_channel_command.add_argument(
+        '--ignore-arch',
+        dest='ignore_arches',
+        action='append',
+        metavar='IGNORE_ARCH',
+        type=str,
+        help='Architecture to ignore/not copy; repeat for multiple arches'
+    )
+    clean_channel_command.add_argument(
+        '--retries', metavar='N',
+        dest='retries',
+        type=int,
+        default=3,
+        help='Retry calls when charmhub issues a 504 error',
+    )
+    clean_channel_command.set_defaults(func=clean_channel)
+
+    # promote
+    change_risk_command = subparser.add_parser(
+        'change-risk',
+        help=('Move a risk on a track to a new risk.  This works by the track '
+              'name.  If the track (via the branch) is configured as a '
+              'duplicate-track, then those tracks are also duplicated using '
+              'the same revision.  The target track is optionally cleaned '
+              'using the bases configured via the associated git branch.  If '
+              'the configuration is broken, and a unique git branch is not '
+              'associated, then the command will fail.'),
+    )
+    change_risk_command.add_argument(
+        '--i-really-mean-it',
+        dest='confirmed',
+        action='store_true',
+        default=False,
+        help=('This flag must be supplied to indicate that the operation '
+              'should really commit the changes.')
+    )
+    change_risk_command.add_argument(
+        '-t', '--track', dest='track',
+        metavar='TRACK', required=True,
+        help='The track on which to promote.',
+    )
+    change_risk_command.add_argument(
+        '-f', '--from-risk',
+        dest='from_risk',
+        metavar='FROM-RISK',
+        required=True,
+        type=str.lower,
+        choices=('edge', 'beta', 'candidate', 'stable'),
+        help='The risk to promote from.',
+    )
+    change_risk_command.add_argument(
+        '-g', '--to-risk',
+        dest='to_risk',
+        metavar='FROM-RISK',
+        required=True,
+        type=str.lower,
+        choices=('edge', 'beta', 'candidate', 'stable'),
+        help='The risk to promote to.',
+    )
+    change_risk_command.add_argument(
+        '--retries', metavar='N',
+        dest='retries',
+        type=int,
+        default=3,
+        help='Retry calls when charmhub issues a 504 error',
+    )
+    change_risk_command.set_defaults(func=change_risk)
+
+    # repair resources
+    # Repair releases on a charm, channel, base filter by finding the
+    # revisions, identifying the metadata for that git branch and then finding
+    # resources to match (by highest number) and re-releasing the charm to the
+    # channel.  This is to fix existing channels that had a charm released
+    # without resources.
+    repair_resource_command = subparser.add_parser(
+        'repair-resources',
+        help=("Repair releases on charmhub, filtering by charm, channel and "
+              "bases - all of which are optional.  The revision is found, "
+              "matched to the git branch and then the associated resources "
+              "determined from the metadata for that branch.  This may be "
+              "wrong, so use this command sparingly when you know that it "
+              "will make the correct decision."),
+    )
+    repair_resource_command.add_argument(
+        '--i-really-mean-it',
+        dest='confirmed',
+        action='store_true',
+        default=False,
+        help=('This flag must be supplied to indicate that the operation '
+              'should really commit the changes.')
+    )
+    repair_resource_command.add_argument(
+        '-s', '--channel', dest='channel',
+        metavar='CHANNEL', required=True,
+        help='The optional channel to repair resources on.',
+    )
+    repair_resource_command.add_argument(
+        '--base',
+        dest='bases',
+        action='append',
+        metavar='BASE',
+        required=False,
+        type=str,
+        help=('Select revision(s) that run on the base (e.g. 20.04, 22.04). '
+              'Can be used multiple times.')
+    )
+    repair_resource_command.add_argument(
+        '--retries', metavar='N',
+        dest='retries',
+        type=int,
+        default=3,
+        help='Retry calls when charmhub issues a 504 error',
+    )
+    repair_resource_command.set_defaults(func=repair_resource)
+
+    # finally, parse the args and return them.
     args = parser.parse_args()
     return args
 
@@ -748,38 +906,44 @@ def request_code_import(args: argparse.Namespace,
 
 def copy_channel(args: argparse.Namespace,
                  gc: GroupConfig,
-                 ) -> Optional[Set[int]]:
+                 ) -> Dict[str, List[int]]:
     """Copy the charms released from a channel to another one.
 
     :param args: the arguments parsed from the command line.
     :para gc: The GroupConfig; i.e. all the charms and their config.
-    :returns: a set of all the revisions copied.
+    :returns: a dictionary of charm name -> revisions released.
     """
     cp_revs = {}
     for cp in gc.projects(select=args.charms):
         src_channel = CharmChannel(cp, args.src_channel)
         dst_channel = CharmChannel(cp, args.dst_channel)
 
-        if src_channel not in cp.channels and not args.force:
-            raise ValueError(f'{src_channel} not in {cp.channels}')
+        if src_channel.track not in cp.charmhub_tracks:
+            logger.error('%s not in %s', src_channel, cp.charmhub_tracks)
+            continue
 
-        if dst_channel not in cp.channels and not args.force:
-            raise ValueError(f'{dst_channel} not in {cp.channels}')
+        if dst_channel.track not in cp.charmhub_tracks:
+            logger.error('%s not in %s', dst_channel, cp.charmhub_tracks)
+            continue
 
         if args.close_dst_channel_before:
             logger.info('Closing %s: %s', cp.charmhub_name, dst_channel.name)
             dst_channel.close(dry_run=not args.confirmed,
                               retries=args.retries)
 
-        cp_revs[cp.charmhub_name] = set()
-        for base in args.bases:
-            logger.info('Copying charm %s from %s to %s', cp.charmhub_name,
-                        src_channel.name, dst_channel.name)
-            revs = cp.copy_channel(src_channel, dst_channel,
-                                   base=base,
-                                   dry_run=not args.confirmed,
-                                   retries=args.retries)
-            cp_revs[cp.charmhub_name] = cp_revs[cp.charmhub_name].union(revs)
+        logger.info('Copying charm %s from %s to %s for bases: %s',
+                    cp.charmhub_name,
+                    src_channel.name,
+                    dst_channel.name,
+                    ', '.join(args.bases))
+        revs = cp.copy_channel(src_channel,
+                               dst_channel,
+                               bases=args.bases,
+                               ignore_arches=args.ignore_arches,
+                               dry_run=not args.confirmed,
+                               force=args.force,
+                               retries=args.retries)
+        cp_revs[cp.charmhub_name] = revs
     return cp_revs
 
 
@@ -818,6 +982,88 @@ def ch_report_main(args: argparse.Namespace,
                             revs_found, cp.charmhub_name, track, risk)
 
     report.generate()
+
+
+def clean_channel(args: argparse.Namespace,
+                  gc: GroupConfig,
+                  ) -> None:
+    """Clean a channel by keeping charm revisions specified by bases.
+
+    :param args: the arguments parsed from the command line.
+    :para gc: The GroupConfig; i.e. all the charms and their config.
+    """
+    for cp in gc.projects(select=args.charms):
+        src_channel = CharmChannel(cp, args.src_channel)
+
+        logger.info('Cleaing channel "%s", for charm %s for bases: %s',
+                    src_channel.name,
+                    cp.charmhub_name,
+                    ', '.join(args.bases))
+        cp.clean_channel(src_channel,
+                         bases=args.bases,
+                         ignore_arches=args.ignore_arches,
+                         dry_run=not args.confirmed,
+                         retries=args.retries)
+
+
+def change_risk(args: argparse.Namespace,
+                gc: GroupConfig,
+                ) -> None:
+    """Promote a track by copying revisions between risk levels.
+
+    Promoting a track is basically selecting the correct revisions between two
+    risk levels.  The "correct" revisions are selected based on the bases
+    configured for the branch as determined from the track.  If the
+    configuration is malformed and a single branch can't be identified uniquely
+    then the command will fail:
+
+    :param args: the arguments parsed from the command line.
+    :para gc: The GroupConfig; i.e. all the charms and their config.
+    """
+    assert args.from_risk != args.to_risk, "Can't change from/to same risk"
+    for cp in gc.projects(select=args.charms):
+        channel_def = f"{args.track}/{args.from_risk}"
+        src_channel = CharmChannel(cp, channel_def)
+        logger.info('Promoting charm "%s" on track "%s" from risk "%s" to '
+                    '"%s"',
+                    cp.charmhub_name, args.track, args.from_risk, args.to_risk)
+        try:
+            cp.change_risk(channel=src_channel,
+                           to_risk=args.to_risk,
+                           dry_run=not args.confirmed,
+                           retries=args.retries)
+        except Exception:
+            logger.info("Couldn't change risk for: %s", cp.charmhub_name)
+
+
+def repair_resource(args: argparse.Namespace,
+                    gc: GroupConfig,
+                    ) -> None:
+    """Repair resources on revisions released to channels.
+
+    This is done by re-releasing the charm revision according to the metadata
+    for that channel obtained from the git repository.  Obviously, if a git
+    repo branch can't be determined then the revision can't be re-released; in
+    that case it'll need to be done manually.
+
+    :param args: the arguments parsed from the command line.
+    :para gc: The GroupConfig; i.e. all the charms and their config.
+    """
+    for cp in gc.projects(select=args.charms):
+        if '/' in args.channel:
+            channels = [args.channel]
+        else:
+            channels = [f"{args.channel}/{r}"
+                        for r in ('stable', 'candidate', 'beta', 'edge')]
+        for channel in channels:
+            src_channel = CharmChannel(cp, channel)
+            logger.info('Checking resources released for  charm "%s" on track'
+                        ' "%s" for optional bases "%s"',
+                        cp.charmhub_name, channel, ','.join(args.bases or []))
+            cp.repair_resource(channel=src_channel,
+                               bases=args.bases or [],
+                               dry_run=not args.confirmed,
+                               retries=args.retries)
 
 
 def setup_logging(loglevel: str) -> None:
