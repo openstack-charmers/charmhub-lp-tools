@@ -919,11 +919,15 @@ def copy_channel(args: argparse.Namespace,
         dst_channel = CharmChannel(cp, args.dst_channel)
 
         if src_channel.track not in cp.charmhub_tracks:
-            logger.error('%s not in %s', src_channel, cp.charmhub_tracks)
+            logger.error('%s not in %s',
+                         str(src_channel.track),
+                         cp.charmhub_tracks)
             continue
 
         if dst_channel.track not in cp.charmhub_tracks:
-            logger.error('%s not in %s', dst_channel, cp.charmhub_tracks)
+            logger.error('%s not in %s',
+                         str(dst_channel.track),
+                         cp.charmhub_tracks)
             continue
 
         if args.close_dst_channel_before:

@@ -31,6 +31,7 @@ class BaseTest(unittest.TestCase):
     def setUp(self):
         self.lpt = mock.MagicMock()
         self.project = charm_project.CharmProject(CHARM_CONFIG, self.lpt)
+        self.project._charmhub_tracks = ['yoga', 'latest', 'xena']
         with open(os.path.join(os.path.dirname(__file__), 'fixtures',
                                'awesome-info.json')) as f:
             self.awesome_info = json.load(f)
