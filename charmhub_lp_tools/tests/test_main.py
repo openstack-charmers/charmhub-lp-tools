@@ -40,8 +40,6 @@ class TestCopyChannel(BaseTest):
         store_client = mock.MagicMock()
         store_client.list_releases.return_value = ([], [], [])
         get_store_client.return_value = store_client
-        self.args.dst_channel = 'invalid/edge'
-        self.args.force = True
         with mock.patch.object(CharmChannel,
                                "get_charm_metadata_for_channel",
                                return_value={}):
@@ -88,12 +86,3 @@ class TestCharmhubReport(BaseTest):
 
         with open(os.path.join(self.tmpdir, 'index.html'), 'r') as f:
             self.assertIn('href="openstack-xena.html"', f.read())
-            with mock.patch.object(CharmChannel,
-                                   "get_charm_metadata_for_channel",
-                                   return_value={}):
-                with requests_mock.Mocker() as m:
-                    m.get(CharmProject.INFO_URL.format(charm='awesome'),
-                          json=self.awesome_info)
-                    revs = main.copy_channel(self.args, self.gc)
-                    self.assertIn('awesome', revs)
-                    self.assertEqual(revs['awesome'], {96, 93, 94, 95})
