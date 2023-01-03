@@ -397,10 +397,13 @@ class CharmChannel:
             all_arch = f"all/{base}"
             if all_arch in revisions_:
                 all_arch_revisions = revisions_[all_arch]
+                delete = False
                 for k in revisions_.keys():
                     if k != all_arch and k[-len(base):] == base:
                         revisions_[k].update(all_arch_revisions)
-                del revisions_[all_arch]
+                        delete = True
+                if delete:
+                    del revisions_[all_arch]
         # now just keep the highest revision for each arch.
         highest_revisions = collections.defaultdict(int)
         for k, v in revisions_.items():
@@ -592,8 +595,10 @@ class CharmProject:
             if ref not in self.branches:
                 self.branches[ref] = dict(default_branch_info)
             if type(branch_info) != dict:
-                raise ValueError('Expected a dict for key branches, '
-                                 f' instead got {type(branch_info)}')
+                raise ValueError(f'{self.charmhub_name}\n'
+                                 f'Expected a dict for key branches, '
+                                 f' instead got {type(branch_info)} - '
+                                 f' {branch_info}')
 
             self.branches[ref].update(branch_info)
 
