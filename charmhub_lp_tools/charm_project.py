@@ -28,16 +28,12 @@ import lazr.restfulclient.errors
 import requests
 import requests_cache
 
-from tenacity import (
-    Retrying,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_fixed,
-)
+import tenacity
 
 from .launchpadtools import LaunchpadTools, TypeLPObject
 from .charmhub import authorize_from_macaroon_dict, get_store_client
 from .exceptions import CharmcraftError504
+from .parsers import parse_channel
 
 # build states
 BUILD_SUCCESSFUL = 'Successfully built'
@@ -100,13 +96,14 @@ def run_charmcraft(
 class CharmChannel:
 
     def __init__(self, project: 'CharmProject', name: str):
-        if '/' in name:
-            self.name = name
-            (self.track, self.risk) = self.name.split('/')
-        else:
-            self.name = f"{name}/stable"
-            self.track = name
-            self.risk = "stable"
+        """Initialse the CharmChannel object
+
+        :param project: the project that this charm channel is associated with
+        :param name: the channel name (track or track/risk)
+        :raises: InvalidRiskLevel if the risk isn't recognised.
+        """
+        self.track, self.risk = parse_channel(name)
+        self.name = f"{self.track}/{self.risk}"
         self.project = project
         self.log = logging.getLogger(f'{__name__}.{self.__class__.__name__}')
 
@@ -152,7 +149,7 @@ class CharmChannel:
 
     @staticmethod
     def get_resources_from_metadata(metadata: Dict) -> List[str]:
-        """Retrieve the metadata as a dictionary.
+        """Retrieve the metadata as a list.
 
         If no resources are specified in the metadata then return an empty
         list.
@@ -161,13 +158,43 @@ class CharmChannel:
         """
         return [k for k in metadata.get('resources', {}).keys()]
 
+    def _retry_request(self, url: str) -> Optional[requests.Response]:
+        """Retry a requests.get(url).
+
+        :param url: the URL to get.
+        :returns: either the Response object or None if couldn't be fetched.
+        """
+        try:
+            for attempt in tenacity.Retrying(
+                    retry=tenacity.retry_if_exception_type(AssertionError),
+                    stop=tenacity.stop_after_attempt(10),
+                    wait=tenacity.wait_exponential(
+                        multiplier=1, min=2, max=10)):
+                with attempt:
+                    try:
+                        result = requests.get(url)
+                    except Exception as e:
+                        msg = f"requests.get({url}) failed with {str(e)}"
+                        self.log.debug(msg)
+                        assert False, msg
+                    if result.status_code != 200:
+                        msg = (
+                            f"Error getting metadata, "
+                            f"code={result.status_code} for url: {url}")
+                        self.log.info(msg)
+                        assert False, msg
+                    return result
+        except AssertionError:
+            pass
+        return None
+
     def get_charm_metadata_for_channel(self) -> Optional[Dict]:
         """Get resource names from charm metadata.
 
-        If the track/risk actually matches a being asked for actually matches a
-        repository branch, then attempt to extract the metadata.yaml file,
-        parse it into YAML and then return this.  If it doesn't match a branch
-        or the file can't be loaded, then it is ignored, and a None return.
+        If the track/risk actually matches a repository branch, then attempt to
+        extract the metadata.yaml file, parse it into YAML and then return
+        this.  If it doesn't match a branch or the file can't be loaded, then
+        it is ignored, and a None return.
 
         :returns: the dictionary loaded from the metadata.yaml if it exists,
             otherwise None.
@@ -209,10 +236,8 @@ class CharmChannel:
             # use requests to get the metadata
             try:
                 self.log.debug("Getting metadata from '%s'", url)
-                result = requests.get(url)
-                if result.status_code != 200:
-                    self.log.info("Error getting metadata, code=%s",
-                                  result.status_code)
+                result = self._retry_request(url)
+                if result is None:
                     return None
                 result_text = result.text.strip()
                 if result_text == "src/metadata.yaml":
@@ -220,7 +245,9 @@ class CharmChannel:
                            f"{found_branch}/src/metadata.yaml")
                     self.log.debug("Following link: getting metadata from"
                                    " '%s'", url)
-                    result = requests.get(url)
+                    result = self._retry_request(url)
+                    if result is None:
+                        return None
                     result_text = result.text.strip()
                 try:
                     return yaml.safe_load(result_text)
@@ -972,6 +999,13 @@ class CharmProject:
                 if not branch_info:
                     logger.info(
                         'No tracks configured for branch %s, continuing.',
+                        lp_branch.path)
+                    no_recipe_branches.append(lp_branch.path)
+                    continue
+
+                if not branch_info.get('enabled', True):
+                    logger.info(
+                        'Branch %s is not enabled, so skipping.',
                         lp_branch.path)
                     no_recipe_branches.append(lp_branch.path)
                     continue
