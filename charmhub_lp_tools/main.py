@@ -74,7 +74,7 @@ from .reports import (
     get_charmhub_report_klass,
     get_supported_report_types,
 )
-
+from .exceptions import InvalidRiskLevel
 
 logger = logging.getLogger(__name__)
 
@@ -564,10 +564,11 @@ def parse_args(config_from_file: FileConfig) -> argparse.Namespace:
         'charmhub-report',
         help='Generate a report based on the published charms in Charmhub.')
     ch_report_commands.add_argument(
-        '--track',
+        '-t', '--track',
         dest='tracks',
         action='append',
         metavar='TRACK',
+        required=True,
         help='Select only tracks that match TRACK',
     )
     ch_report_commands.add_argument(
@@ -626,18 +627,18 @@ def parse_args(config_from_file: FileConfig) -> argparse.Namespace:
     )
     clean_channel_command.set_defaults(func=clean_channel)
 
-    # promote
-    change_risk_command = subparser.add_parser(
-        'change-risk',
-        help=('Move a risk on a track to a new risk.  This works by the track '
-              'name.  If the track (via the branch) is configured as a '
-              'duplicate-track, then those tracks are also duplicated using '
-              'the same revision.  The target track is optionally cleaned '
-              'using the bases configured via the associated git branch.  If '
-              'the configuration is broken, and a unique git branch is not '
-              'associated, then the command will fail.'),
+    # close-channel
+    close_channel_command = subparser.add_parser(
+        'close-channel',
+        help=('Close a channel (track/risk) by specifying channel. '
+              'This will check that the revision is not unique and is '
+              'available on another risk for that track.  If the --force '
+              'flag is used, the check for uniqueness is not made. '
+              '--i-really-mean-it is needed, or --interactive, to actually '
+              'make the change. NOTE: this is quite dangerous - use '
+              'sparingly!.'),
     )
-    change_risk_command.add_argument(
+    close_channel_command.add_argument(
         '--i-really-mean-it',
         dest='confirmed',
         action='store_true',
@@ -645,12 +646,55 @@ def parse_args(config_from_file: FileConfig) -> argparse.Namespace:
         help=('This flag must be supplied to indicate that the operation '
               'should really commit the changes.')
     )
-    change_risk_command.add_argument(
+    close_channel_command.add_argument(
+        '--force',
+        dest='force',
+        action='store_true',
+        default=False,
+        help=('This flag must be supplied to indicate that a channel with a '
+              'unique revision in it (from all the revisions) will be okay '
+              'to be closed.')
+    )
+    close_channel_command.add_argument(
+        '-s', '--channel', dest='channel',
+        metavar='CHANNEL', required=True,
+        help='The channel as track/risk to clean.',
+    )
+    close_channel_command.add_argument(
+        '--retries', metavar='N',
+        dest='retries',
+        type=int,
+        default=3,
+        help='Retry calls when charmhub issues a 504 error',
+    )
+    close_channel_command.set_defaults(func=close_channel)
+
+    # promote
+    copy_revisions_command = subparser.add_parser(
+        'copy-revision',
+        help=('Copy a revisions on a track from one risk to a new risk.  '
+              'This works by the track name.  If the track (via the branch) '
+              'is configured as a duplicate-track, then those tracks are '
+              'also duplicated using the same revision.  The target track '
+              'is optionally cleaned using the bases configured via the '
+              'associated git branch.  If the configuration is broken, and '
+              'a unique git branch is not ' 'associated, then the command '
+              'will fail.'),
+    )
+    copy_revisions_command.add_argument(
+        '--i-really-mean-it',
+        dest='confirmed',
+        action='store_true',
+        default=False,
+        help=('This flag must be supplied to indicate that the operation '
+              'should really commit the changes.')
+    )
+    copy_revisions_command.add_argument(
         '-t', '--track', dest='track',
         metavar='TRACK', required=True,
         help='The track on which to promote.',
     )
-    change_risk_command.add_argument(
+    copy_revisions_command.add_argument(
         '-f', '--from-risk',
         dest='from_risk',
         metavar='FROM-RISK',
@@ -659,7 +703,7 @@ def parse_args(config_from_file: FileConfig) -> argparse.Namespace:
         choices=('edge', 'beta', 'candidate', 'stable'),
         help='The risk to promote from.',
     )
-    change_risk_command.add_argument(
+    copy_revisions_command.add_argument(
         '-g', '--to-risk',
         dest='to_risk',
         metavar='FROM-RISK',
@@ -668,14 +712,14 @@ def parse_args(config_from_file: FileConfig) -> argparse.Namespace:
         choices=('edge', 'beta', 'candidate', 'stable'),
         help='The risk to promote to.',
     )
-    change_risk_command.add_argument(
+    copy_revisions_command.add_argument(
         '--retries', metavar='N',
         dest='retries',
         type=int,
         default=3,
         help='Retry calls when charmhub issues a 504 error',
     )
-    change_risk_command.set_defaults(func=change_risk)
+    copy_revisions_command.set_defaults(func=copy_revisions)
 
     # repair resources
     # Repair releases on a charm, channel, base filter by finding the
@@ -1010,9 +1054,9 @@ def clean_channel(args: argparse.Namespace,
                          retries=args.retries)
 
 
-def change_risk(args: argparse.Namespace,
-                gc: GroupConfig,
-                ) -> None:
+def copy_revisions(args: argparse.Namespace,
+                   gc: GroupConfig,
+                   ) -> None:
     """Promote a track by copying revisions between risk levels.
 
     Promoting a track is basically selecting the correct revisions between two
@@ -1024,20 +1068,50 @@ def change_risk(args: argparse.Namespace,
     :param args: the arguments parsed from the command line.
     :para gc: The GroupConfig; i.e. all the charms and their config.
     """
-    assert args.from_risk != args.to_risk, "Can't change from/to same risk"
+    assert args.from_risk != args.to_risk, "Can't copy from/to same risk"
     for cp in gc.projects(select=args.charms):
         channel_def = f"{args.track}/{args.from_risk}"
         src_channel = CharmChannel(cp, channel_def)
-        logger.info('Promoting charm "%s" on track "%s" from risk "%s" to '
-                    '"%s"',
+        logger.info('Copying revision charm "%s" on track "%s" from risk "%s" '
+                    'to "%s"',
                     cp.charmhub_name, args.track, args.from_risk, args.to_risk)
         try:
-            cp.change_risk(channel=src_channel,
-                           to_risk=args.to_risk,
-                           dry_run=not args.confirmed,
-                           retries=args.retries)
-        except Exception:
-            logger.info("Couldn't change risk for: %s", cp.charmhub_name)
+            cp.copy_revisions(channel=src_channel,
+                              to_risk=args.to_risk,
+                              dry_run=not args.confirmed,
+                              retries=args.retries)
+        except Exception as e:
+            logger.info("Couldn't copy revision for: %s", cp.charmhub_name)
+            logger.error("Exception %s", str(e))
+
+
+def close_channel(args: argparse.Namespace,
+                  gc: GroupConfig,
+                  ) -> None:
+    """Close a channel.
+
+    Close a channel.  This might be done to clean-up a particular risk
+    (although note that there is a clean-channel command for that purpose).
+
+    :param args: the arguments parsed from the command line.
+    :para gc: The GroupConfig; i.e. all the charms and their config.
+    """
+    for cp in gc.projects(select=args.charms):
+        try:
+            src_channel = CharmChannel(cp, args.channel)
+        except InvalidRiskLevel:
+            print(f"Channel {args.channel} doesn't have a valid risk")
+            return
+        logger.info('Closing channel "%s" for charm: %s',
+                    args.channel, cp.charmhub_name)
+        try:
+            cp.close_channel(channel=src_channel,
+                             dry_run=not args.confirmed,
+                             force=args.force,
+                             retries=args.retries)
+        except Exception as e:
+            logger.info("Couldn't close channel for: %s", cp.charmhub_name)
+            logger.error("Exception: %s", str(e))
 
 
 def repair_resource(args: argparse.Namespace,

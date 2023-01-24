@@ -14,6 +14,7 @@
 
 import collections
 import json
+import itertools
 import logging
 import subprocess
 import tempfile
@@ -72,10 +73,12 @@ def run_charmcraft(
     :param retries: Retry if charmhub responds with a 500 error.
     :raises: subprocess error if the charmcraft command fails.
     """
-    for attempt in Retrying(wait=wait_fixed(1),
-                            retry=retry_if_exception_type(CharmcraftError504),
-                            reraise=True,
-                            stop=stop_after_attempt(retries)):
+    for attempt in tenacity.Retrying(
+        wait=tenacity.wait_fixed(1),
+        retry=tenacity.retry_if_exception_type(CharmcraftError504),
+        reraise=True,
+        stop=tenacity.stop_after_attempt(retries)
+    ):
         with attempt:
             try:
                 p = subprocess.run(cmd,
@@ -1563,13 +1566,13 @@ class CharmProject:
 
         return copied_revisions
 
-    def change_risk(self,
-                    channel: CharmChannel,
-                    to_risk: str,
-                    branch: Optional[str] = None,
-                    dry_run: bool = True,
-                    retries: int = 0) -> Optional[Set[int]]:
-        """Change the charm from one risk to another.
+    def copy_revisions(self,
+                       channel: CharmChannel,
+                       to_risk: str,
+                       branch: Optional[str] = None,
+                       dry_run: bool = True,
+                       retries: int = 0) -> Optional[Set[int]]:
+        """Copy revisions from one risk to another.
 
         This function finds the appropriate revisions (according to the bases
         configured - and checks that they are configured) and puts them on the
@@ -1681,6 +1684,60 @@ class CharmProject:
 
         return copied_revisions
 
+    def close_channel(self,
+                      channel: CharmChannel,
+                      dry_run: bool = True,
+                      force:bool = False,
+                      retries: int = 0) -> None:
+        """Close a channel on the charm.
+
+        This runs: `charmcraft close <charm> <channel>
+
+        If dry_run is true then it just prints out the command and indicates
+        whether the the revision is unique.
+
+        The force flag is required if the revision is unique across the risks.
+
+        :param channel: the channel to work with as <track>/<risk>
+        :param dry_run: If True, no changes are made.
+        :param force: all it to happen even if the revision is unique across
+            all the risks.
+        :param retries: set the number of retries; charmhub can occasionally
+            fail with 504, etc.
+        """
+        other_channels = [
+            CharmChannel(channel.project, f"{channel.track}/{r}")
+            for r in ('edge', 'beta', 'candidate', 'stable')
+            if r != channel.risk]
+        all_other_revisions = set(
+            itertools.chain(*(c.get_all_revisions() for c in other_channels)))
+        close_revisions = channel.get_all_revisions()
+        if not close_revisions:
+            print(f"Charm: {self.charmhub_name}, channel: {channel} has no "
+                  "revisions")
+            return
+        if not close_revisions.issubset(all_other_revisions):
+            unique_revisions = sorted(
+                close_revisions.difference(all_other_revisions))
+            print(f"Charm: {self.charmhub_name:30} channel {str(channel):20} "
+                  f" unique revisions: "
+                  f"{', '.join(str(i) for i in unique_revisions)} ",
+                  end="")
+            if not force:
+                print(" (not forcing so not closing)")
+                return
+        cmd = f"charmcraft close {self.charmhub_name} {channel}"
+        if dry_run:
+            print(f" -> would run: {cmd}")
+        else:
+            print(f" -> running: {cmd}")
+            try:
+                run_charmcraft(cmd.split(), check=True, retries=retries)
+            except subprocess.CalledProcessError as e:
+                print(f"Command failed; channel {channel} for charm "
+                      f"{self.charmhub_name} may not be closed.")
+
+
     def repair_resource(self,
                         channel: CharmChannel,
                         bases: List[str],
@@ -1739,7 +1796,7 @@ class CharmProject:
 
         metadata = channel.get_charm_metadata_for_channel()
         if metadata is None:
-            self.log.info("Couldn't get medtadata, so can't repair this "
+            self.log.info("Couldn't get metadata, so can't repair this "
                           "channel: %s", channel.name)
             return
         resource_names = channel.get_resources_from_metadata(metadata or {})
@@ -1793,6 +1850,8 @@ class CharmProject:
         found_branches = set()
         len_channel = len(channel)
         for _branch, branch_info in self.branches.items():
+            if not branch_info.get('enabled', True):
+                continue
             if _branch.startswith('refs/heads/'):
                 branch = _branch[len('refs/heads/'):]
             else:
