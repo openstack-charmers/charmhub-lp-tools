@@ -75,6 +75,8 @@ from .reports import (
     get_supported_report_types,
 )
 from .exceptions import InvalidRiskLevel
+from .schema import config_schema
+
 
 logger = logging.getLogger(__name__)
 
@@ -200,6 +202,8 @@ class GroupConfig:
         for file in files:
             with open(file, 'r') as f:
                 group_config = yaml.safe_load(f)
+                # validate the content against the schema
+                config_schema.validate(group_config)
             logger.debug('group_config is: \n%s', pprint.pformat(group_config))
             project_defaults = group_config.get('defaults', {})
             # foo/bar/openstack.yaml -> openstack
@@ -768,6 +772,11 @@ def parse_args(config_from_file: FileConfig) -> argparse.Namespace:
     )
     repair_resource_command.set_defaults(func=repair_resource)
 
+    validate_config_commands = subparser.add_parser(
+        'validate-config',
+        help='Validate the configuration according to the schema.')
+    validate_config_commands.set_defaults(func=validate_config_main)
+
     # finally, parse the args and return them.
     args = parser.parse_args()
     return args
@@ -1142,6 +1151,13 @@ def repair_resource(args: argparse.Namespace,
                                bases=args.bases or [],
                                dry_run=not args.confirmed,
                                retries=args.retries)
+
+
+def validate_config_main(args: argparse.Namespace,
+                         gc: GroupConfig,
+                         ):
+    """Validate configuration files based on the schema"""
+    print("Valid config")
 
 
 def setup_logging(loglevel: str) -> None:
