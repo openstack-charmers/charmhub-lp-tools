@@ -1157,7 +1157,11 @@ def validate_config_main(args: argparse.Namespace,
                          gc: GroupConfig,
                          ):
     """Validate configuration files based on the schema"""
-    print("Valid config")
+    # This subcommand is a NOOP, if the execution reached to this point it
+    # means the configuration was loaded successfully and validated correctly
+    # by the schema, so there is no need do anything else than inform the user
+    # the configuration is valid.
+    print("The configuration is valid according to the schema.")
 
 
 def setup_logging(loglevel: str) -> None:
