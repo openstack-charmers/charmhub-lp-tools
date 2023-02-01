@@ -1687,7 +1687,7 @@ class CharmProject:
     def close_channel(self,
                       channel: CharmChannel,
                       dry_run: bool = True,
-                      force:bool = False,
+                      force: bool = False,
                       retries: int = 0) -> None:
         """Close a channel on the charm.
 
@@ -1735,8 +1735,8 @@ class CharmProject:
                 run_charmcraft(cmd.split(), check=True, retries=retries)
             except subprocess.CalledProcessError as e:
                 print(f"Command failed; channel {channel} for charm "
-                      f"{self.charmhub_name} may not be closed.")
-
+                      f"{self.charmhub_name} may not be closed. Reason: "
+                      f"{str(e)}")
 
     def repair_resource(self,
                         channel: CharmChannel,
