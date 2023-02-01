@@ -52,7 +52,7 @@ class TestCharmhubReports(BaseTest):
     def _check_report(self, klass, output):
         report = klass(output)
         with requests_mock.Mocker() as m:
-            m.get(charm_project.CharmChannel.INFO_URL.format(charm='awesome'),
+            m.get(charm_project.CharmProject.INFO_URL.format(charm='awesome'),
                   json=self.awesome_info)
 
             channel = charm_project.CharmChannel(self.project, 'yoga/stable')

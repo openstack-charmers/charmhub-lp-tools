@@ -14,12 +14,14 @@
 
 import collections
 import json
+import itertools
 import logging
 import subprocess
 import tempfile
 from typing import (Any, Dict, Generator, List, Tuple, IO, Optional, Set)
 import sys
 import time
+import yaml
 
 from contextlib import suppress
 
@@ -27,16 +29,12 @@ import lazr.restfulclient.errors
 import requests
 import requests_cache
 
-from tenacity import (
-    Retrying,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_fixed,
-)
+import tenacity
 
 from .launchpadtools import LaunchpadTools, TypeLPObject
 from .charmhub import authorize_from_macaroon_dict, get_store_client
 from .exceptions import CharmcraftError504
+from .parsers import parse_channel
 
 # build states
 BUILD_SUCCESSFUL = 'Successfully built'
@@ -73,11 +71,14 @@ def run_charmcraft(
     :param check: If check is True and the exit code was non-zero, it raises
                   a CalledProcessError.
     :param retries: Retry if charmhub responds with a 500 error.
+    :raises: subprocess error if the charmcraft command fails.
     """
-    for attempt in Retrying(wait=wait_fixed(1),
-                            retry=retry_if_exception_type(CharmcraftError504),
-                            reraise=True,
-                            stop=stop_after_attempt(retries)):
+    for attempt in tenacity.Retrying(
+        wait=tenacity.wait_fixed(1),
+        retry=tenacity.retry_if_exception_type(CharmcraftError504),
+        reraise=True,
+        stop=tenacity.stop_after_attempt(retries)
+    ):
         with attempt:
             try:
                 p = subprocess.run(cmd,
@@ -97,13 +98,16 @@ def run_charmcraft(
 
 class CharmChannel:
 
-    INFO_URL = CHARMHUB_BASE + "/info/{charm}?fields=channel-map"
-
     def __init__(self, project: 'CharmProject', name: str):
-        self.name = name
-        (self.track, self.risk) = self.name.split('/')
+        """Initialse the CharmChannel object
+
+        :param project: the project that this charm channel is associated with
+        :param name: the channel name (track or track/risk)
+        :raises: InvalidRiskLevel if the risk isn't recognised.
+        """
+        self.track, self.risk = parse_channel(name)
+        self.name = f"{self.track}/{self.risk}"
         self.project = project
-        self._raw_charm_info = None
         self.log = logging.getLogger(f'{__name__}.{self.__class__.__name__}')
 
     def __str__(self):
@@ -120,16 +124,8 @@ class CharmChannel:
         return hash((self.project.charmhub_name, self.name))
 
     @property
-    def raw_charm_info(self):
-        if not self._raw_charm_info:
-            self._raw_charm_info = requests_session.get(
-                self.INFO_URL.format(charm=self.project.charmhub_name)
-            )
-        return self._raw_charm_info
-
-    @property
     def channel_map(self):
-        return self.raw_charm_info.json()['channel-map']
+        return self.project.charmhub_channel_map
 
     def close(
             self,
@@ -154,14 +150,142 @@ class CharmChannel:
             self.log.debug('Running: %s', ' '.join(cmd))
             return run_charmcraft(cmd, check=check, retries=retries)
 
+    @staticmethod
+    def get_resources_from_metadata(metadata: Dict) -> List[str]:
+        """Retrieve the metadata as a list.
+
+        If no resources are specified in the metadata then return an empty
+        list.
+
+        :returns: the list of resource names.
+        """
+        return [k for k in metadata.get('resources', {}).keys()]
+
+    def _retry_request(self, url: str) -> Optional[requests.Response]:
+        """Retry a requests.get(url).
+
+        :param url: the URL to get.
+        :returns: either the Response object or None if couldn't be fetched.
+        """
+        try:
+            for attempt in tenacity.Retrying(
+                    retry=tenacity.retry_if_exception_type(AssertionError),
+                    stop=tenacity.stop_after_attempt(10),
+                    wait=tenacity.wait_exponential(
+                        multiplier=1, min=2, max=10)):
+                with attempt:
+                    try:
+                        result = requests.get(url)
+                    except Exception as e:
+                        msg = f"requests.get({url}) failed with {str(e)}"
+                        self.log.debug(msg)
+                        assert False, msg
+                    if result.status_code != 200:
+                        msg = (
+                            f"Error getting metadata, "
+                            f"code={result.status_code} for url: {url}")
+                        self.log.info(msg)
+                        assert False, msg
+                    return result
+        except AssertionError:
+            pass
+        return None
+
+    def get_charm_metadata_for_channel(self) -> Optional[Dict]:
+        """Get resource names from charm metadata.
+
+        If the track/risk actually matches a repository branch, then attempt to
+        extract the metadata.yaml file, parse it into YAML and then return
+        this.  If it doesn't match a branch or the file can't be loaded, then
+        it is ignored, and a None return.
+
+        :returns: the dictionary loaded from the metadata.yaml if it exists,
+            otherwise None.
+        """
+        repo = self.project.repository
+        # first see if we find the branch from the track/risk
+        # if we can't then no point in continuing
+        find_channel = f"{self.track}/{self.risk}"
+        found_branch = None
+        for branch, branch_data in self.project.branches.items():
+            for channel in branch_data['channels']:
+                if channel == find_channel:
+                    # found the branch, let's set it.
+                    if branch.startswith("refs/heads/"):
+                        found_branch = branch[len("refs/heads/"):]
+                    else:
+                        found_branch = branch
+                    # break the inner loop
+                    break
+            else:
+                # continue outer loop if the inner loop wasn't broken
+                continue
+            # Inner loop was broken, break outer loop
+            break
+        if found_branch is None:
+            self.log.debug("get_charm_metadata_for_channel: "
+                           "couldn't find branch, so returning None.")
+            return None
+        if repo.startswith("https://opendev.org/"):
+            # repo is https://opendev.org/openstack/charm-keystone.git
+            # url is https://opendev.org/{user}/{charm}/raw/branch/
+            #              {branch}/metadata.yaml
+            user_charm = repo[len("https://opendev.org/"):]
+            (user, charm) = user_charm.split('/')
+            if charm.endswith(".git"):
+                charm = charm[:-4]
+            url = (f"https://opendev.org/{user}/{charm}/raw/branch/"
+                   f"{found_branch}/metadata.yaml")
+            # use requests to get the metadata
+            try:
+                self.log.debug("Getting metadata from '%s'", url)
+                result = self._retry_request(url)
+                if result is None:
+                    return None
+                result_text = result.text.strip()
+                if result_text == "src/metadata.yaml":
+                    url = (f"https://opendev.org/{user}/{charm}/raw/branch/"
+                           f"{found_branch}/src/metadata.yaml")
+                    self.log.debug("Following link: getting metadata from"
+                                   " '%s'", url)
+                    result = self._retry_request(url)
+                    if result is None:
+                        return None
+                    result_text = result.text.strip()
+                try:
+                    return yaml.safe_load(result_text)
+                except Exception as e:
+                    self.log.error(
+                        "Couldn't decode response due to %s\nResponse:\n%s",
+                        str(e), result.text)
+            except Exception as e:
+                self.log.error('Failed to fetch metadata.yam: %s', str(e))
+                return None
+
+        else:
+            # don't know what to do with that one.
+            self.log.error("Don't know how to fetch metadata.yaml from "
+                           " %s", repo)
+            return None
+
     def release(
             self,
             revision: int,
             dry_run: bool = True,
             check: bool = True,
             retries: int = 0,
+            resource_names: Optional[List[str]] = None,
     ) -> Optional[subprocess.CompletedProcess]:
         """Release a charm's revision in the channel.
+
+        Try to release a charm's revision into the channel. The caller can
+        provide the resource_names that should be released alongside the charm,
+        and if missing they will be found for the charm by searching for the
+        highest revision available. The copy command will preferentially use
+        the resources already assigned from the existing revision.  i.e. the
+        additional 'search' for resources is to fix existing malformed charmhub
+        releases that weren't released with revisions.  This is as best a fix
+        up, but if not done, the release will fail.
 
         :param revision: charm's revision id to release
         :param dry_run: if True run 'charmcraft release', otherwise just log
@@ -169,32 +293,103 @@ class CharmChannel:
         :param check: If check is True and the exit code was non-zero, it
                       raises a CalledProcessError.
         :param retries: Retry if charmhub responds with a 500 error.
+        :param resource_names: optional list of resource names to check are
+            going to be included when writing the revision to the target
+            channel.
         :returns: an instance of CompletedProcess if dry_run is False,
                   otherwise None
         """
         cmd = ['charmcraft', 'release', self.project.charmhub_name,
                f'--revision={revision}', f'--channel={self.name}']
 
-        resources = self.find_resources(revision)
-        for resource in resources:
-            cmd.append(f'--resource={resource.name}:{resource.revision}')
+        (found_resources, missing_resources) = (
+            self._resolve_resources_for_revision(revision, resource_names))
+        for resource in found_resources + missing_resources:
+            cmd.append(f'--resource={resource[0]}:{resource[1]}')
         if dry_run:
             print(' '.join(cmd), " # dry-run mode")
         else:
-            self.log.debug('Running: %s', ' '.join(cmd))
+            print(f"Running: {' '.join(cmd)}")
             return run_charmcraft(cmd, check=check, retries=retries)
 
-    def decode_channel_map(self,
-                           base: Optional[str],
-                           arch: Optional[str] = None,
-                           ) -> Optional[Set[int]]:
-        """Decode the channel.
+    def _resolve_resources_for_revision(
+            self,
+            revision: int,
+            resource_names: Optional[List[str]] = None,
+    ) -> Tuple[List[Tuple[str, int]], List[Tuple[str, int]]]:
+        """Resolve the resources for a revision.
+
+        Work out what resources should be on the revision.  If resource_names
+        is supplied then that is used as the definitive resource names that
+        should be on the revision.
+
+        These are filled out with the resource revision numbers found against
+        the revision.  They are then back-filled by looking at the resources
+        themselves, and picking the highest number available.  This is unlikely
+        to be correct, and is only used to 'fix' revisions which were either
+        imported into charmhub from the charmstore, or were released prior to
+        the charmhub enforcing revisions.
+
+        :param revision: the integer revision number in the charmhub for this
+            charm.
+        :param resource_names: optional list of definitive resource names that
+            should be on the revision.
+        :returns: a tuple of (list of (resource name, resource revision),
+                             (list of (resource name, resource revision))
+            where the lists are (found resources, missing resources)
+        """
+        resources = self.find_resources(revision)
+        resource_names = resource_names or []
+        # validate that all the resources exist
+        names = [resource.name for resource in resources]
+        insert_resources = []
+        if list(sorted(names)) != list(sorted(resource_names)):
+            missing_resources = list(set(resource_names) - set(names))
+            self.log.warning("resources missing!: %s",
+                             ','.join(missing_resources))
+            for resource in missing_resources:
+                revisions = self.get_resource_revisions(resource)
+                if revisions:
+                    # add the highest numbered revision available
+                    insert_resources.append(
+                        (resource, list(sorted(revisions))[-1]))
+                else:
+                    raise Exception(
+                        f"Can't construct resource revision for {resource}")
+        return ([(r.name, r.revision) for r in resources], insert_resources)
+
+    def get_all_revisions(self) -> Set[int]:
+        """Get all of the revisions in this channel.
+
+        :returns: set of all revisions in the channel.
+        """
+        all_revisions = set()
+        for channel_def in self.channel_map:
+            revision = channel_def['revision']
+            revision_num = revision['revision']
+            chan_track = channel_def['channel']['track']
+            chan_risk = channel_def['channel']['risk']
+            if (chan_track, chan_risk) == (self.track, self.risk):
+                all_revisions.add(revision_num)
+        return all_revisions
+
+    def get_revisions_for_bases(self,
+                                bases: List[str],
+                                arch: Optional[str] = None,
+                                ignore_arches: Optional[List[str]] = None,
+                                ) -> Set[int]:
+        """Decode the channel and return a set of (revision, [arches]).
 
         :param base: base channel.
         :param arch: Filter by architecture
+        :param ignore_arches: Filter by ignoring the following list of arches.
         :returns: The revision id associated with this channel.
         """
-        revisions = set()
+        if ignore_arches is None:
+            _ignore_arches = set()
+        else:
+            _ignore_arches = set(ignore_arches)
+        revisions_: Dict[str, Set[int]] = collections.defaultdict(set)
         for i, channel_def in enumerate(self.channel_map):
             base_arch = channel_def['channel']['base']['architecture']
             base_chan = channel_def['channel']['base']['channel']
@@ -205,8 +400,14 @@ class CharmChannel:
             arches = [f"{v['architecture']}/{v['channel']}"
                       for v in revision['bases']]
 
+            if set(v['architecture'] for v in
+                   revision['bases']).intersection(_ignore_arches):
+                # ignore any revisions that include any of the ignored
+                # architecctures.
+                continue
+
             if (
-                    (base is None or base_chan == base) and
+                    base_chan in bases and
                     (chan_track, chan_risk) == (self.track, self.risk) and
                     (arch is None or arch in arches)
             ):
@@ -215,29 +416,61 @@ class CharmChannel:
                              self.project.charmhub_name, i, base_arch,
                              base_chan, revision_num, chan_track,
                              chan_risk, ", ".join(arches))
-                revisions.add(revision_num)
+                for a in arches:
+                    for base in bases:
+                        if a[-len(base):] == base:
+                            revisions_[a].add(revision_num)
 
+        # add "all/<base>" arch revisions to the other revisions of the same
+        # base.
+        for base in bases:
+            all_arch = f"all/{base}"
+            if all_arch in revisions_:
+                all_arch_revisions = revisions_[all_arch]
+                delete = False
+                for k in revisions_.keys():
+                    if k != all_arch and k[-len(base):] == base:
+                        revisions_[k].update(all_arch_revisions)
+                        delete = True
+                if delete:
+                    del revisions_[all_arch]
+        # now just keep the highest revision for each arch.
+        highest_revisions = collections.defaultdict(int)
+        for k, v in revisions_.items():
+            highest_revisions[k] = list(sorted(revisions_[k]))[-1]
+        # and collect the final set of revisions to keep.
+        revisions = set(v for v in highest_revisions.values())
         return revisions
 
     def find_resources(
             self,
             revision: int
-    ) -> Optional[List[object]]:
+    ) -> List[object]:
         """Find resources associated to a revision.
 
         :param revision: revision number
         :returns: a list of resources that were released with a charm revision
         """
         store = get_store_client()
-        channel_map, channels, revisions = store.list_releases(
-            self.project.charmhub_name
-        )
+        channel_map = store.list_releases(self.project.charmhub_name)[0]
 
         for release in channel_map:
             if release.revision == revision:
                 return release.resources
 
         return []  # no resources found
+
+    def get_resource_revisions(self, resource_name: str) -> List[int]:
+        """Get the revisions of a resource associated with a charm.
+
+        :param resource_name: the resource to get a list of revisions for.
+        :returns: the list of revisions (ints) for the named resource.
+        """
+        store = get_store_client()
+        revisions = store.list_resource_revisions(
+            self.project.charmhub_name,
+            resource_name)
+        return [r.revision for r in revisions]
 
 
 class CharmProject:
@@ -273,6 +506,14 @@ class CharmProject:
           key is the name of the snap or base and the value is the full
           channel identifier (e.g. latest/edge). Currently, Launchpad accepts
           the following keys: charmcraft, core, core18, core20 and core22.
+      * bases (optional) - a list of bases (e.g. "18.04", "20.04") that should
+          be present in the channels.  Note that this can be different to the
+          charmcraft.yaml 'run-on' bases as it may allow for custom bases.
+      * duplicate-channels (optional) - a list of bases which are duplicates of
+          this channel. i.e. if the charm is to be provided to both the train
+          and rocky channels, the this would be added to the train channel,
+          with rocky as the duplicate assuming the the train branch/channel is
+          the source for the charm.
 
     The following examples provide information for various scenarios.
 
@@ -323,7 +564,35 @@ class CharmProject:
       stable/xena:
         channels:
           - xena/edge
+
+
+    The follow example builds a charm on the main branch of the git repository
+    and publishes the resutls to the yoga/edge and latest/edge channels, builds
+    the charm on the stable/xena branch and publishes the results to the
+    xena/edge channel.  Additionally, the xena/edge channel is restricted to
+    the 20.04 base, and any operations on the xena channel are duplicated to
+    the victoria channel (e.g. copy, clean)
+
+    name: Awesome Charm
+    charmhub: awesome
+    launchpad: charm-awesome
+    team: awesome-charmers
+    repo: https://github.com/canonical/charm-awesome-operator
+    branches:
+      main:
+        channels:
+          - yoga/edge
+          - latest/edge
+      stable/xena:
+        channels:
+          - xena/edge
+        bases:
+          - "20.04"
+        duplicate-channels:
+          - victoria
     """
+
+    INFO_URL = CHARMHUB_BASE + "/info/{charm}?fields=channel-map"
 
     def __init__(self, config: Dict[str, Any], lpt: 'LaunchpadTools'):
         self.lpt = lpt
@@ -337,7 +606,9 @@ class CharmProject:
         self.repository: str = config.get('repository')  # type: ignore
         self.project_group: str = config.get('project_group')  # type: ignore
         self._lp_repo = None
-        self._channels = None  # type: Set
+        self._channels = None  # type: Optional[Set]
+        self._raw_charm_info = None
+        self._charmhub_tracks = None  # type: Optional[List[str]]
 
         self.branches: Dict[str, Dict[str, Any]] = {}
 
@@ -354,8 +625,10 @@ class CharmProject:
             if ref not in self.branches:
                 self.branches[ref] = dict(default_branch_info)
             if type(branch_info) != dict:
-                raise ValueError('Expected a dict for key branches, '
-                                 f' instead got {type(branch_info)}')
+                raise ValueError(f'{self.charmhub_name}\n'
+                                 f'Expected a dict for key branches, '
+                                 f' instead got {type(branch_info)} - '
+                                 f' {branch_info}')
 
             self.branches[ref].update(branch_info)
 
@@ -373,10 +646,49 @@ class CharmProject:
         self._add_branches(config.get('branches', {}))
 
     @property
+    def raw_charm_info(self):
+        if not self._raw_charm_info:
+            self._raw_charm_info = requests.get(
+                self.INFO_URL.format(charm=self.charmhub_name)
+            )
+        return self._raw_charm_info
+
+    @property
+    def charmhub_channel_map(self):
+        try:
+            self.raw_charm_info.encoding = 'utf-8'
+            m = json.loads(self.raw_charm_info.text.strip())
+            return m['channel-map']
+        except json.JSONDecodeError as e:
+            # it went wrong, let's print what we got:
+            self.log.error("channel_map: It went horribly wrong: %s", str(e))
+            self.log.error("Received:\n%s", self.raw_charm_info.text)
+            raise
+
+    @property
+    def charmhub_tracks(self) -> List[str]:
+        """Return the list of tracks defined in charmhub for the project.
+
+        This returns the tracks that have been defined in the charmhub, minus
+        the risk. e.g. yoga, if a full channel is yoga/stable.
+        """
+        if self._charmhub_tracks is None:
+            store = get_store_client()
+            channels = store.list_releases(self.charmhub_name)[1]
+            tracks = collections.OrderedDict()
+            for channel in channels:
+                try:
+                    tracks[channel.track]
+                except KeyError:
+                    tracks[channel.track] = 1
+            self._charmhub_tracks = list(tracks.keys())
+        return self._charmhub_tracks
+
+    @property
     def channels(self) -> Set[CharmChannel]:
         if not self._channels:
             self._channels = set()
-            for key, value in self.branches.items():
+            for value in self.branches.values():
                 for channel in value['channels']:
                     self._channels.add(CharmChannel(self, channel))
 
@@ -684,12 +996,19 @@ class CharmProject:
         mentioned_branches: List[str] = []
 
         if self.lp_repo:
-            for lp_branch in self.lp_repo.branches:
+            for lp_branch in self.lp_repo.branches:  # type: ignore
                 mentioned_branches.append(lp_branch.path)
                 branch_info = self.branches.get(lp_branch.path, None)
                 if not branch_info:
                     logger.info(
                         'No tracks configured for branch %s, continuing.',
+                        lp_branch.path)
+                    no_recipe_branches.append(lp_branch.path)
+                    continue
+
+                if not branch_info.get('enabled', True):
+                    logger.info(
+                        'Branch %s is not enabled, so skipping.',
                         lp_branch.path)
                     no_recipe_branches.append(lp_branch.path)
                     continue
@@ -717,7 +1036,7 @@ class CharmProject:
                 # channels are <track>/<risk>
                 channels = branch_info.get('channels', None)
                 if upload and channels:
-                    tracks = self._group_channels(channels)
+                    tracks = ((self._encode_track_name(channels), channels), )
                 else:
                     tracks = (("latest", []),)
                 for track, track_channels in tracks:
@@ -730,7 +1049,7 @@ class CharmProject:
                     # they are not 'unknown' recipes and don't get deleted.
                     lp_recipe = charm_lp_recipe_map.pop(recipe_name, None)
 
-                    # Now if fitlering just continue
+                    # Now if filtering just continue
                     if are_filtering:
                         continue
 
@@ -866,11 +1185,13 @@ class CharmProject:
                     branch = (
                         detail['current_recipe']
                         .git_ref.path[len('refs/heads/'):])
+                    bases = self._get_bases_from_config(branch)
                     channels = ', '.join(detail['current_recipe']
                                          .store_channels)
                     print(f"   - {name[:40]:40} - "
                           f"git branch: {branch[:20]:20} "
-                          f"channels: {channels}",
+                          f"channels: {channels:30}"
+                          f"bases: {','.join(bases or [])}",
                           file=file)
 
     def get_builds(self,
@@ -1001,9 +1322,11 @@ class CharmProject:
         :param recipe: a LP object that is for the recipe to auth.
         """
         try:
-            macaroon_dict = json.loads(recipe.beginAuthorization())
+            macaroon_dict = json.loads(
+                recipe.beginAuthorization())  # type:ignore
             result = authorize_from_macaroon_dict(macaroon_dict)
-            recipe.completeAuthorization(discharge_macaroon=result)
+            recipe.completeAuthorization(
+                discharge_macaroon=result)  # type:ignore
         # blanket catch.  This is part of serveral attempts, so we don't want
         # to stop trying just because one fails.  If all fail, it'll be pretty
         # obvious!
@@ -1122,34 +1445,428 @@ class CharmProject:
     def copy_channel(self,
                      source: CharmChannel,
                      destination: CharmChannel,
-                     base: str,
+                     bases: List[str],
+                     ignore_arches: Optional[List[str]] = None,
                      dry_run: bool = True,
-                     retries: int = 0):
+                     force: bool = False,
+                     retries: int = 0) -> Set[int]:
         """Copy the published charms from one channel to another.
+
+        Note: existing released revisions on a channel may not have had the
+        resources appropriately assigned; if they are not specified in the
+        release command, then it will fail.  Therefore, this command works
+        really hard to find the resources for a revision (and then the charm's
+        metadata) and assign a resource:revision to it as needed.
 
         :param source: the source channel
         :param destination: the destination channel
-        :param base: Filter by base (e.g. '20.04', '22.04', etc)
+        :param bases: Filter by base (e.g. '20.04', '22.04', etc)
+        :param ignore_arches: Filter out arches that are not wanted in the
+            copy.
         :param dry_run: if True it won't commit the operation
         :param retries: Retry if charmhub responds with a 500 error.
         :returns: the list of revisions that have been copied.
         """
         copied_revisions = set()
-        revisions = source.decode_channel_map(base)
+        revisions = source.get_revisions_for_bases(
+            bases, ignore_arches=ignore_arches)
+        target_revisions = destination.get_revisions_for_bases(
+            bases, ignore_arches=ignore_arches)
+        self.log.info("Source revisions: %s, target revisions: %s",
+                      ', '.join(str(r) for r in revisions),
+                      ', '.join(str(r) for r in target_revisions))
+        metadata = source.get_charm_metadata_for_channel()
+        resource_names = source.get_resources_from_metadata(metadata or {})
         for revision in revisions:
+            if revision in target_revisions:
+                if not force:
+                    self.log.info(
+                        "Revision %s already released in channel %s",
+                        revision, destination.name)
+                    continue
+                else:
+                    self.log.info(
+                        "Revision %s already in channel %s but force enabled "
+                        "so releasing anyway.",
+                        revision, destination.name)
             self.log.info('Releasing %s revision %s into channel %s',
                           self.charmhub_name,
                           revision,
                           destination.name)
-            destination.release(revision, dry_run=dry_run,
-                                retries=retries)
+            destination.release(revision,
+                                dry_run=dry_run,
+                                retries=retries,
+                                resource_names=resource_names)
             copied_revisions.add(revision)
 
         return copied_revisions
 
+    def clean_channel(self,
+                      source: CharmChannel,
+                      bases: List[str],
+                      ignore_arches: Optional[List[str]] = None,
+                      dry_run: bool = True,
+                      retries: int = 0) -> Set[int]:
+        """Clean the channel and keep revisions based on the bases passed.
+
+        Note: existing released revisions on a channel may not have had the
+        resources appropriately assigned; if they are not specified in the
+        release command, then it will fail.  Therefore, this command works
+        really hard to find the resources for a revision (and then the charm's
+        metadata) and assign a resource:revision to it as needed.
+
+        If the target channel clean command fails, then it is ignored (no
+        release is done), and if the revisions on the channel don't change,
+        then no clean or release is done.
+
+        :param source: the channel to clean
+        :param bases: Filter by base (e.g. '20.04', '22.04', etc)
+        :param dry_run: if True it won't commit the operation
+        :param retries: Retry if charmhub responds with a 500 error.
+        """
+        copied_revisions = set()
+        all_revisions = source.get_all_revisions()
+        self.log.debug("All revisions in channel: %s are %s",
+                       source.name,
+                       ",".join(str(r) for r in all_revisions))
+        revisions = source.get_revisions_for_bases(
+            bases, ignore_arches=ignore_arches)
+        self.log.debug("Selected revisions in channel: %s (bases %s) are %s",
+                       source.name,
+                       ", ".join(bases),
+                       ",".join(str(r) for r in revisions))
+        if all_revisions == revisions:
+            self.log.info("No need to clean channel: "
+                          "Revisions %s for bases %s are all that is on "
+                          "channel: %s",
+                          ",".join(str(r) for r in list(sorted(revisions))),
+                          ", ".join(bases),
+                          source.name)
+            return copied_revisions
+        metadata = source.get_charm_metadata_for_channel()
+        resource_names = source.get_resources_from_metadata(metadata or {})
+
+        self.log.info('Closing %s: %s', self.charmhub_name, source.name)
+        try:
+            source.close(dry_run=dry_run, retries=retries)
+        except Exception:
+            # if an exception is raised, the command failed, don't try to do
+            # anything in this case.
+            return copied_revisions
+        for revision in revisions:
+            self.log.info('Releasing %s revision %s into channel %s',
+                          self.charmhub_name,
+                          revision,
+                          source.name)
+            source.release(revision,
+                           dry_run=dry_run,
+                           retries=retries,
+                           resource_names=resource_names)
+            copied_revisions.add(revision)
+
+        return copied_revisions
+
+    def copy_revisions(self,
+                       channel: CharmChannel,
+                       to_risk: str,
+                       branch: Optional[str] = None,
+                       dry_run: bool = True,
+                       retries: int = 0) -> Optional[Set[int]]:
+        """Copy revisions from one risk to another.
+
+        This function finds the appropriate revisions (according to the bases
+        configured - and checks that they are configured) and puts them on the
+        target risk along with any required resources.
+
+        Note this function raises an Exception if the bases are not configured,
+        or the associated git branch, cannot be determined for the charm. This
+        is a weakness of the current system.  Use the copy-channel command
+        instead.
+
+        The git branch is determined by either finding a unique exact match of
+        the track/risk, and if that fails, and then trying, or an exact track
+        match.
+
+        :param channel: the channel to take the revision(s) from.
+        :param to_risk: where to put the revisions.
+        :param dry_run: if True, just print what would be done, rather than
+            doing it.
+        :param retries: Retry if charmhub responds with a 500 error.
+        :returns: Set of revisions that were copied.
+        :raises: AssertionError if the git branch couldn't be determined.
+        """
+        copied_revisions = set()
+
+        # Determine the branch that matches the channel that is selected.
+        if branch is None:
+            branch = self._determine_repo_branch_from_channel(channel.name)
+            if branch is None:
+                if '/' in channel.name:
+                    track = channel.name.split('/', 1)[0]
+                    branch = self._determine_repo_branch_from_channel(track)
+            assert branch is not None, "Couldn't determine branch from channel"
+
+        # get the configured bases for the branch.
+        branch_spec = self.branches.get(
+            branch, self.branches.get(f"refs/heads/{branch}"))
+        assert branch_spec is not None, "branch incorrectly specified!"
+        bases = branch_spec.get('bases')
+        assert bases is not None, "No bases specified for branch."
+        self.log.debug("Found bases for '%s' as: %s",
+                       channel.name, ','.join(bases))
+
+        # copy the revisions as per the bases to the target risk.
+        revisions = list(sorted(channel.get_revisions_for_bases(bases)))
+        self.log.debug("Found revisions to copy as: %s",
+                       ','.join(str(r) for r in revisions))
+        if not revisions:
+            self.log.info("No revisions found, so nothing to do")
+            return
+
+        metadata = channel.get_charm_metadata_for_channel()
+        resource_names = channel.get_resources_from_metadata(metadata or {})
+
+        # See if there are any duplicate-channels defined.
+        duplicate_channel_names = branch_spec.get('duplicate-channels', [])
+        duplicate_channels = [CharmChannel(channel.project,
+                                           f"{c}/{channel.risk}")
+                              for c in duplicate_channel_names]
+        if duplicate_channels:
+            self.log.info("Channels to sync (duplicate-channels): %s",
+                          ','.join(str(c) for c in duplicate_channels))
+            # check revisions are on the duplicate channels, if not, release
+            # them there
+            for c in duplicate_channels:
+                c_revisions = c.get_revisions_for_bases(bases)
+                self.log.info("Revisions %s found on %s",
+                              ','.join(str(r) for r in c_revisions),
+                              c)
+                for revision in revisions:
+                    if revision not in c_revisions:
+                        self.log.info(
+                            'Releasing %s revision %s into channel %s',
+                            self.charmhub_name,
+                            revision,
+                            c.name)
+                        c.release(revision, dry_run=dry_run, retries=retries,
+                                  resource_names=resource_names)
+
+        # now for all possible channels, release the revisions into the
+        # appropriate channel.
+        for src_channel in [channel] + duplicate_channels:
+            # now form destination channel, for the release.
+            destination = f"{src_channel.track}/{to_risk}"
+            destination_channel = CharmChannel(channel.project, destination)
+
+            # get the revisions currently on the destination channel.
+            destination_revisions = (destination_channel
+                                     .get_revisions_for_bases(bases))
+            self.log.info("Revisions found for %s: %s",
+                          destination_channel.name,
+                          ", ".join(str(r) for r in destination_revisions))
+
+            for revision in revisions:
+                if revision in destination_revisions:
+                    self.log.info(
+                        "Revision %s already existing in channel %s.",
+                        revision,
+                        destination_channel.name)
+                    continue
+                self.log.info('Releasing %s revision %s into channel %s',
+                              self.charmhub_name,
+                              revision,
+                              destination_channel.name)
+                destination_channel.release(revision,
+                                            dry_run=dry_run,
+                                            retries=retries,
+                                            resource_names=resource_names)
+                copied_revisions.add(revision)
+
+        return copied_revisions
+
+    def close_channel(self,
+                      channel: CharmChannel,
+                      dry_run: bool = True,
+                      force: bool = False,
+                      retries: int = 0) -> None:
+        """Close a channel on the charm.
+
+        This runs: `charmcraft close <charm> <channel>
+
+        If dry_run is true then it just prints out the command and indicates
+        whether the the revision is unique.
+
+        The force flag is required if the revision is unique across the risks.
+
+        :param channel: the channel to work with as <track>/<risk>
+        :param dry_run: If True, no changes are made.
+        :param force: all it to happen even if the revision is unique across
+            all the risks.
+        :param retries: set the number of retries; charmhub can occasionally
+            fail with 504, etc.
+        """
+        other_channels = [
+            CharmChannel(channel.project, f"{channel.track}/{r}")
+            for r in ('edge', 'beta', 'candidate', 'stable')
+            if r != channel.risk]
+        all_other_revisions = set(
+            itertools.chain(*(c.get_all_revisions() for c in other_channels)))
+        close_revisions = channel.get_all_revisions()
+        if not close_revisions:
+            print(f"Charm: {self.charmhub_name}, channel: {channel} has no "
+                  "revisions")
+            return
+        if not close_revisions.issubset(all_other_revisions):
+            unique_revisions = sorted(
+                close_revisions.difference(all_other_revisions))
+            print(f"Charm: {self.charmhub_name:30} channel {str(channel):20} "
+                  f" unique revisions: "
+                  f"{', '.join(str(i) for i in unique_revisions)} ",
+                  end="")
+            if not force:
+                print(" (not forcing so not closing)")
+                return
+        cmd = f"charmcraft close {self.charmhub_name} {channel}"
+        if dry_run:
+            print(f" -> would run: {cmd}")
+        else:
+            print(f" -> running: {cmd}")
+            try:
+                run_charmcraft(cmd.split(), check=True, retries=retries)
+            except subprocess.CalledProcessError as e:
+                print(f"Command failed; channel {channel} for charm "
+                      f"{self.charmhub_name} may not be closed. Reason: "
+                      f"{str(e)}")
+
+    def repair_resource(self,
+                        channel: CharmChannel,
+                        bases: List[str],
+                        dry_run: bool = True,
+                        check: bool = True,
+                        retries: int = 0) -> Optional[Set[int]]:
+        """Repair the revisions on the channel by releasing with resources.
+
+        This function finds all of the revisions on a particular channel, and
+        optionally filtered by the bases and ensures that all of the revisions
+        are available on the that release.  If not then it attempts to identify
+        the resources (and there versions) using the metadata.yaml from the
+        same branch as the charm (note that this may be too new for the actual
+        revision released) and then re-release the charm with that revision.
+
+        The git branch is determined by either finding a unique exact match of
+        the track/risk, and if that fails, and then trying, or an exact track
+        match.
+
+        :param channel: the channel to take the revision(s) from.
+        :param bases: filter the revisions according to bases.
+        :param dry_run: if True, just print what would be done, rather than
+            doing it.
+        :param retries: Retry if charmhub responds with a 500 error.
+        :returns: Set of revisions that were copied.
+        :raises: AssertionError if the git branch couldn't be determined.
+        """
+        # firstly, determine the git branch associated with the channel
+        branch = self._determine_repo_branch_from_channel(channel.name)
+        if branch is None:
+            if '/' in channel.name:
+                track = channel.name.split('/', 1)[0]
+                branch = self._determine_repo_branch_from_channel(track)
+        if branch is None:
+            self.log.info("Couldn't determine the repo branch for %s on %s",
+                          channel.name, self.charmhub_name)
+            return
+
+        # if bases are empty, get them from the config if available.
+        if not bases:
+            bases = self._get_bases_from_config(branch)
+            if bases is None:
+                self.log.info("No bases for channel %s, so ignoring.",
+                              self.name)
+                return
+            self.log.debug(
+                "Found bases for '%s' as: %s", channel.name, ','.join(bases))
+
+        # copy the revisions as per the bases to the target risk.
+        revisions = list(sorted(channel.get_revisions_for_bases(bases)))
+        self.log.info("Found revisions to potentially fix as: %s",
+                      ','.join(str(r) for r in revisions))
+        if not revisions:
+            self.log.info("No revisions found, so nothing to do")
+            return
+
+        metadata = channel.get_charm_metadata_for_channel()
+        if metadata is None:
+            self.log.info("Couldn't get metadata, so can't repair this "
+                          "channel: %s", channel.name)
+            return
+        resource_names = channel.get_resources_from_metadata(metadata or {})
+
+        # for each revision found, we resolve the resources and then see
+        # whether the revision needs to be re-released on the channel.
+        for revision in revisions:
+            (found_resources, missing_resources) = (
+                channel._resolve_resources_for_revision(
+                    revision, resource_names))
+            if not missing_resources:
+                self.log.info("All resources present, so not updating: %s",
+                              ', '.join(r[0] for r in found_resources))
+                continue
+
+            # re-release the revision on the channel with the resources
+            cmd = ['charmcraft', 'release', self.charmhub_name,
+                   f'--revision={revision}', f'--channel={channel.name}']
+            for resource in found_resources + missing_resources:
+                cmd.append(f'--resource={resource[0]}:{resource[1]}')
+            if dry_run:
+                print(' '.join(cmd), " # dry-run mode")
+            else:
+                print(f"Running: {' '.join(cmd)}")
+                run_charmcraft(cmd, check=check, retries=retries)
+
+    def _get_bases_from_config(self, branch: str) -> List[str]:
+        """Get the 'bases' config if it exists from builder config."""
+        # get the configured bases for the branch.
+        branch_spec = self.branches.get(
+            branch, self.branches.get(f"refs/heads/{branch}"))
+        assert branch_spec is not None, "branch incorrectly specified!"
+        bases = branch_spec.get('bases')  # type:ignore
+        if bases is None:
+            return []
+        return bases
+
+    def _determine_repo_branch_from_channel(
+            self, channel: str
+    ) -> Optional[str]:
+        """Determine, if possible, the repo branch for a channel.
+
+        The channel can be track/risk or just 'track'.  If it is not found, or
+        not unique, then None will be returned.  It is the prefix of the
+        channel that is searched against.
+
+        :param channel: the track[/risk] against which to match against.
+        :returns: None if not found, otherwise the branch (e.g. master,
+            stable/x)
+        """
+        found_branches = set()
+        len_channel = len(channel)
+        for _branch, branch_info in self.branches.items():
+            if not branch_info.get('enabled', True):
+                continue
+            if _branch.startswith('refs/heads/'):
+                branch = _branch[len('refs/heads/'):]
+            else:
+                branch = _branch
+            for _channel in branch_info.get('channels', []):
+                if channel == _channel[:len_channel]:
+                    found_branches.add(branch)
+
+        if len(found_branches) == 1:
+            return list(found_branches)[0]
+        return None
+
     def _find_recipes(self, branches):
         info = self._calc_recipes_for_repo()
-        for recipe_name, in_config_recipe in info['in_config_recipes'].items():
+        for in_config_recipe in info['in_config_recipes'].values():
             branch_path = (
                 in_config_recipe['build_from']['lp_branch'].path or '')
             if branch_path.startswith('refs/heads/'):
@@ -1164,30 +1881,37 @@ class CharmProject:
                 yield current_recipe
 
     @staticmethod
-    def _group_channels(channels: List[str],
-                        ) -> List[Tuple[str, List[str]]]:
-        """Group channels into compatible lists.
+    def _encode_track_name(channels: List[str]) -> str:
+        """Decode a list of channels into a track name.
 
-        The charmhub appears to only allow a recipe to target a single channel,
-        but with multiple levels of risk and/or 'branches'.  The specs for
-        channels are either 'latest' or 'latest/<risk>'.  In this case, the
-        grouping would be
-        [('latest', ['latest', 'latest/edge', 'latest/stable']),]
+        The track name needs to be compatible with the track name from former
+        _group_channels() function (now deleted) which was used to group
+        channels to the same track. The track name is the first of the channels
+        found. If two tracks are found, then the track-name is a hyphenated
+        pair of the tracks.  If 3 or more are found, then it is the first
+        track, two hyphens and the final track name.
 
-        :param channels: a list of channels to target in the charmhub
-        :returns: the channels, grouped by track.
+        :param channels: The list of track/risk channel descriptors.
+        :returns: a string representing the track name.
         """
-        groups = collections.OrderedDict()
+        tracks = []
         for channel in channels:
             if '/' in channel:
-                group, _ = channel.split('/', 1)
+                track, _ = channel.split('/', 1)
             else:
-                group = channel
-            try:
-                groups[group].append(channel)
-            except KeyError:
-                groups[group] = [channel]
-        return list(groups.items())
+                track = channel
+            if track not in tracks:
+                tracks.append(track)
+        # now choose the track name.
+        num = len(tracks)
+        if num == 0:
+            return 'unknown'
+        elif num == 1:
+            return tracks[0]
+        elif num == 2:
+            return f"{tracks[0]}-{tracks[1]}"
+        else:
+            return f"{tracks[0]}--{tracks[-1]}"
 
     def __repr__(self):
         return (f"CharmProject(name={self.name}, team={self.team}, "
@@ -1205,7 +1929,11 @@ class CharmProject:
             else:
                 bname = branch
             channels = ", ".join(spec['channels'])
-            branches.append(f"{bname} -> {channels}")
+            if spec.get('bases'):
+                bases_str = f" [bases: {','.join(spec.get('bases'))}]"
+            else:
+                bases_str = ""
+            branches.append(f"{bname} -> {channels}{bases_str}")
         branches_str = ''
         if branches:
             branches_str = f"{'branches':>{width}}: {branches[0]}"

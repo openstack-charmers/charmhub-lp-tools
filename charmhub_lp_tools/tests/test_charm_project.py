@@ -87,16 +87,18 @@ class TestCharmChannel(BaseTest):
     def test_decode_channel_map(self):
 
         with requests_mock.Mocker() as m:
-            m.get(charm_project.CharmChannel.INFO_URL.format(charm='awesome'),
+            m.get(charm_project.CharmProject.INFO_URL.format(charm='awesome'),
                   json=self.awesome_info)
 
             charm_channel = charm_project.CharmChannel(self.project,
                                                        'yoga/stable')
-            self.assertEqual(charm_channel.decode_channel_map('22.04'),
+            self.assertEqual(charm_channel
+                             .get_revisions_for_bases(bases=['22.04']),
                              {79})
             charm_channel = charm_project.CharmChannel(self.project,
                                                        'latest/edge')
-            self.assertEqual(charm_channel.decode_channel_map('22.04'),
+            self.assertEqual(charm_channel
+                             .get_revisions_for_bases(bases=['22.04']),
                              {96, 93, 94, 95})
 
     @mock.patch('charmhub_lp_tools.charm_project.get_store_client')
