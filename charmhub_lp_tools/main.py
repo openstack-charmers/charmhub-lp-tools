@@ -43,29 +43,26 @@ ignore_errors = true|false (false is the default)
 """
 
 import argparse
-import collections
-import collections.abc
 import logging
 import os
 import pathlib
-import pprint
 import sys
 import yaml
 
 from datetime import datetime
-from typing import (Any, Dict, Iterator, List, Optional, NamedTuple)
+from typing import (Any, Dict, List, Optional, NamedTuple)
 try:
     from zoneinfo import ZoneInfo
 except ImportError:
     from backports.zoneinfo import ZoneInfo
 
+from .group_config import GroupConfig
 from .launchpadtools import (
     LaunchpadTools,
     setup_logging as lpt_setup_logging,
 )
 from .charm_project import (
     CharmChannel,
-    CharmProject,
     setup_logging as cp_setup_logging,
 )
 from .charmhub import setup_logging as ch_setup_logging
@@ -75,7 +72,6 @@ from .reports import (
     get_supported_report_types,
 )
 from .exceptions import InvalidRiskLevel
-from .schema import config_schema
 
 
 logger = logging.getLogger(__name__)
@@ -164,88 +160,6 @@ def get_group_config_filenames(config_dir: pathlib.Path,
                 raise FileNotFoundError(
                     f"The group config file '{file}' wasn't found")
     return files
-
-
-class GroupConfig:
-    """Collect together all the config files and build CharmProject objects.
-
-    This collects together the files passed (which define a charm projects
-    config and creates CharmProject objects to ensure git repositories and
-    ensure that the charm builder recipes in launchpad exist with the correct
-    settings.
-    """
-
-    def __init__(self,
-                 lpt: 'LaunchpadTools',
-                 files: List[pathlib.Path] = None) -> None:
-        """Configure the GroupConfig object.
-
-        :param files: the list of files to load config from.
-        """
-        self.lpt = lpt
-        self.charm_projects: Dict[str, 'CharmProject'] = (
-            collections.OrderedDict())
-        if files is not None:
-            self.load_files(files)
-
-    def load_files(self, files: List[pathlib.Path] = None) -> None:
-        """Load the files into the object.
-
-        This loads the files, and configures the projects and then creates
-        CharmProject objects.
-
-        :param files: the list of files to load config from.
-        """
-        assert not (isinstance(files, str)), "param files must not be str"
-        assert isinstance(files, collections.abc.Sequence), \
-            "Must pass a list or tuple."
-        for file in files:
-            with open(file, 'r') as f:
-                group_config = yaml.safe_load(f)
-                # validate the content against the schema
-                config_schema.validate(group_config)
-            logger.debug('group_config is: \n%s', pprint.pformat(group_config))
-            project_defaults = group_config.get('defaults', {})
-            # foo/bar/openstack.yaml -> openstack
-            project_group = os.path.splitext(os.path.basename(file))[0]
-            for project in group_config.get('projects', []):
-                for key, value in project_defaults.items():
-                    project.setdefault(key, value)
-                logger.debug('Loaded project %s', project.get('name'))
-                project['project_group'] = project_group
-                self.add_charm_project(project)
-
-    def add_charm_project(self,
-                          project_config: Dict[str, Any],
-                          merge: bool = False,
-                          ) -> None:
-        """Add a CharmProject object from the project specification dict.
-
-        :param project: the project to add.
-        :param merge: if merge is True, merge/overwrite the existing object.
-        :raises: ValueError if merge is false and the charm project already
-            exists.
-        """
-        name: str = project_config.get('name')  # type: ignore
-        if name in self.charm_projects:
-            if merge:
-                self.charm_projects[name].merge(project_config)
-            else:
-                raise ValueError(
-                    f"Project config for '{name}' already exists.")
-        else:
-            self.charm_projects[name] = CharmProject(project_config, self.lpt)
-
-    def projects(self, select: Optional[List[str]] = None,
-                 ) -> Iterator[CharmProject]:
-        """Generator returns a list of projects."""
-        if not (select):
-            select = None
-        for project in self.charm_projects.values():
-            if (select is None or
-                    project.launchpad_project in select or
-                    project.charmhub_name in select):
-                yield project
 
 
 def parse_args(argv: Optional[List[str]],
