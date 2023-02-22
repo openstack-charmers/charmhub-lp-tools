@@ -1,0 +1,6 @@
+- project:
+    vars:
+      needs_charm_build: true
+      charm_build_name: fake
+      build_type: charmcraft
+      charmcraft_channel: 2.0/stable

@@ -56,6 +56,7 @@ try:
 except ImportError:
     from backports.zoneinfo import ZoneInfo
 
+from . import osci_sync
 from .group_config import GroupConfig
 from .launchpadtools import (
     LaunchpadTools,
@@ -694,6 +695,8 @@ def parse_args(argv: Optional[List[str]],
         'validate-config',
         help='Validate the configuration according to the schema.')
     validate_config_commands.set_defaults(func=validate_config_main)
+
+    osci_sync.setup_parser(subparser)
 
     # finally, parse the args and return them.
     args = parser.parse_args(argv)
