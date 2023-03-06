@@ -248,12 +248,14 @@ class GroupConfig:
                 yield project
 
 
-def parse_args(config_from_file: FileConfig) -> argparse.Namespace:
+def parse_args(argv: Optional[List[str]],
+               config_from_file: FileConfig) -> argparse.Namespace:
     """Parse the arguments and return the parsed args.
 
     Work out what command is being run and collect the arguments
     associated with it.
 
+    :param argv: The list of command line arguments to parse.
     :param config_from_file: the arguments from the config_file, if any
     :returns: parsed arguments
     """
@@ -302,6 +304,8 @@ def parse_args(config_from_file: FileConfig) -> argparse.Namespace:
                         default=default_ignore_errors,
                         action='store_true',
                         help='Ignore errors and try to carry on.')
+    parser.add_argument('--anonymous', dest='anonymous', action='store_true',
+                        help='Login anonymously to Launchpad.')
 
     subparser = parser.add_subparsers(required=True, dest='cmd')
     show_command = subparser.add_parser(
@@ -778,7 +782,7 @@ def parse_args(config_from_file: FileConfig) -> argparse.Namespace:
     validate_config_commands.set_defaults(func=validate_config_main)
 
     # finally, parse the args and return them.
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     return args
 
 
@@ -1173,10 +1177,13 @@ def setup_logging(loglevel: str) -> None:
     ch_setup_logging(loglevel)
 
 
-def main():
-    """Main entry point."""
+def main(argv: Optional[List[str]] = None):
+    """Main entry point.
+
+    :param argv: The list of command line arguments to parse.
+    """
     config_from_file = get_file_config()
-    args = parse_args(config_from_file)
+    args = parse_args(argv, config_from_file)
     setup_logging(args.loglevel)
 
     config_dir = check_config_dir_exists(
@@ -1188,7 +1195,11 @@ def main():
     files = get_group_config_filenames(config_dir,
                                        args.project_groups)
 
-    lpt = LaunchpadTools()
+    # To validate the configuration there is no need to login.
+    if args.func == validate_config_main:
+        args.anonymous = True
+
+    lpt = LaunchpadTools(anonymous=args.anonymous)
 
     gc = GroupConfig(lpt)
     gc.load_files(files)

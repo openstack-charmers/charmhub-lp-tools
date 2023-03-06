@@ -1,0 +1,40 @@
+defaults:
+  team: openstack-charmers
+
+projects:
+  - name: HA Cluster Charm
+    charmhub: hacluster
+    launchpad: charm-hacluster
+    repository: https://opendev.org/openstack/charm-hacluster.git
+    branches:
+      master:
+        build-channels:
+          charmcraft: "1.5/stable"
+        channels:
+          - latest/edge
+        bases:
+          - "20.04"
+          - "22.04"
+      stable/jammy:
+        build-channels:
+          charmcraft: "1.5/stable"
+        channels:
+          - 2.4/stable
+        bases:
+          - "20.04"
+          - "22.04"
+      stable/focal:
+        build-channels:
+          charmcraft: "1.5/stable"
+        channels:
+          - 2.0.3/stable
+        bases:
+          - "18.04"
+          - "20.04"
+      stable/bionic:
+        build-channels:
+          charmcraft: "1.5/stable"
+        channels:
+          - 1.1.18/edge
+        bases:
+          - "18.04"
