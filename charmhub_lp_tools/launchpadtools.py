@@ -23,6 +23,8 @@ import lazr.restfulclient.resource
 from launchpadlib.uris import lookup_service_root
 from launchpadlib.launchpad import Launchpad
 
+from .constants import PROGRAM_NAME
+
 # All objects returned by launchpadlib are lazr.restfulclient.resource.Entry
 TypeLPObject = lazr.restfulclient.resource.Entry
 
@@ -42,14 +44,24 @@ def setup_logging(loglevel: str) -> None:
 class LaunchpadTools:
     """LaunchpadTools - a helper class to work with launchpadlib."""
 
-    def __init__(self) -> None:
-        """Create a LaunchpadTools object, and login to launchpad."""
-        self.lp = Launchpad.login_with(
-            'openstack-charm-tools',
-            service_root=lookup_service_root('production'),
-            version='devel',
-            credential_save_failed=self.no_credential,
-        )
+    def __init__(self, anonymous: bool = False) -> None:
+        """Create a LaunchpadTools object, and login to launchpad.
+
+        :param anonymous: loging to Launchpad anonymously if true.
+        """
+        if anonymous:
+            self.lp = Launchpad.login_anonymously(
+                PROGRAM_NAME,
+                service_root=lookup_service_root('production'),
+                version='devel'
+            )
+        else:
+            self.lp = Launchpad.login_with(
+                PROGRAM_NAME,
+                service_root=lookup_service_root('production'),
+                version='devel',
+                credential_save_failed=self.no_credential,
+            )
 
     @staticmethod
     def no_credential() -> None:

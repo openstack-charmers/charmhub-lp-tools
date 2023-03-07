@@ -10,3 +10,4 @@ class Risk(Enum):
 
 
 LIST_OF_RISKS = [x.value for x in list(Risk)]
+PROGRAM_NAME = 'openstack-charm-tools'

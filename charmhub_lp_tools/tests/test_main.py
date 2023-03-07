@@ -1,3 +1,4 @@
+import io
 import os
 import shutil
 import tempfile
@@ -86,3 +87,22 @@ class TestCharmhubReport(BaseTest):
 
         with open(os.path.join(self.tmpdir, 'index.html'), 'r') as f:
             self.assertIn('href="openstack-xena.html"', f.read())
+
+
+class TestMain(BaseTest):
+
+    def setUp(self):
+        self.lp_builder_config = os.path.join(os.path.dirname(__file__),
+                                              'fixtures', 'lp-builder-config')
+
+    def test_help(self):
+        with mock.patch('sys.stdout', new=io.StringIO()) as stdout:
+            self.assertRaises(SystemExit, main.main, ['-h'])
+            stdout.seek(0)
+            captured = stdout.getvalue()
+            self.assertIn('Configure launchpad projects for charms', captured)
+
+    @mock.patch.object(main, 'LaunchpadTools')
+    def test_anonymous(self, LaunchpadTools):
+        main.main(['--config-dir', self.lp_builder_config, 'validate-config'])
+        LaunchpadTools.assert_called_with(anonymous=True)
