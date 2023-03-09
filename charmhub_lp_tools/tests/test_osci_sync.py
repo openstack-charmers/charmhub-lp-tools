@@ -17,6 +17,7 @@
 import argparse
 import os
 import pathlib
+import pprint
 import unittest
 
 from unittest import mock
@@ -62,21 +63,19 @@ class TestOsciSync(unittest.TestCase):
         self.assertEqual(osci_sync.get_project_vars(osci),
                          {'charm_build_name': 'fake'})
 
-    def test_update_auto_build_channel_if_needed(self):
+    def test_gen_auto_build_channel(self):
         lp_key = 'charmcraft'
         auto_build_channels = {lp_key: '1.5/stable',
                                'core18': 'latest/edge'}
         osci_key = 'charmcraft_channel'
         project_vars = {osci_key: '2.1/stable'}
-        changed = osci_sync.update_auto_build_channel_if_needed(
+        changed = osci_sync.gen_auto_build_channel(
             auto_build_channels,
-            lp_key,
             project_vars,
-            osci_key)
-        self.assertTrue(changed)
-        self.assertDictEqual(auto_build_channels,
-                             {lp_key: '2.1/stable',
-                              'core18': 'latest/edge'})
+            [(lp_key, osci_key, None)])
+        expected = {lp_key: '2.1/stable',
+                    'core18': 'latest/edge'}
+        self.assertDictEqual(changed, expected)
 
     def test_setup_parser(self):
         parser = argparse.ArgumentParser(description='Test')
@@ -113,8 +112,10 @@ class TestOsciSync(unittest.TestCase):
 
         osci_sync.main(args, gc)
         logger.info.assert_any_call('Using recipe %s', recipe.web_link)
-        logger.info.assert_any_call('Updating %s channel from %s to %s',
-                                    'charmcraft', None, '2.0/stable')
+        logger.info.assert_any_call(
+            'The auto build channels have changed: %s',
+            pprint.pformat({'charmcraft': '2.0/stable'}),
+        )
         logger.info.assert_any_call('Dry-run mode: NOT committing the changes')
         recipe.lp_save.assert_not_called()
 

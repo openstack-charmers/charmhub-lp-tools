@@ -16,12 +16,15 @@ import argparse
 import logging
 import os
 import pathlib
+import pprint
 import sys
 
+from copy import deepcopy
 from typing import (
     Any,
     Dict,
     List,
+    Tuple,
 )
 
 import git
@@ -49,6 +52,25 @@ from .parsers import (
 
 OsciYamlType = List[Any]
 logger = logging.getLogger(__name__)
+
+
+def diff_auto_build_channels(lp_auto_build_channels: Dict[str, str],
+                             local_auto_build_channels: Dict[str, str]):
+    """
+    Obtain the differences between auto build channels maps.
+
+    The differences are obtained using the symmetic difference operation from
+    sets.
+
+    :param lp_auto_build_channels: the baseline auto build channels as defined
+                                   in Launchpad build recipe
+    :param local_auto_build_channels: the auto build channels built from
+                                      information defined in osci.yaml
+    :returns: the differences between both auto build channels map.
+    """
+    a_set = set(lp_auto_build_channels.items())
+    b_set = set(local_auto_build_channels.items())
+    return dict(a_set ^ b_set)
 
 
 def find_osci_yaml(git_repo: git.Repo) -> pathlib.Path:
@@ -79,7 +101,7 @@ def load_osci_yaml(git_repo: git.Repo) -> OsciYamlType:
 
 
 def get_charm_name(osci: OsciYamlType) -> str:
-    """Get the charm name defined in osci.yaml
+    """Get the charm name defined in osci.yaml.
 
     :param osci: the osci configuration set in the repo.
     :returns: the charm name
@@ -106,35 +128,38 @@ def get_project_vars(osci: OsciYamlType) -> Dict[str, Any]:
         return section['project']['vars']
 
 
-def update_auto_build_channel_if_needed(auto_build_channels: Dict[str, Any],
-                                        lp_key: str,
-                                        project_vars: Dict[str, Any],
-                                        osci_key: str,
-                                        default: str = None):
-    """Update the auto build channel if needed.
+def gen_auto_build_channel(auto_build_channels: Dict[str, Any],
+                           project_vars: Dict[str, Any],
+                           auto_build_keys: List[Tuple[str, str, object]],
+                           ) -> Dict[str, str]:
+    """Generate a auto_build_channel compatible map.
 
-    :param auto_build_channels: dictionary with the auto build channels that
-                                needs to be updated.
-    :param lp_key: the name of the Launchpad auto build channel to update.
+    Generate a auto_build_channel map based on the information available in
+    ``project_vars`` for the value referenced by ``osci_key``.
+
+    :param auto_build_channels: dictionary with the auto build channels to
+                                compare against.
     :param project_vars: the project vars declared in osci.yaml
-    :param osci_key: the name of the osci.yaml build channel to read the value
-                     from.
-    :param default: default value in case the osci_key is not present in
-                    project_vars
-    :returns: True if the auto_build_channels was updated, otherwise False.
-    """
-    new_value = project_vars.get(osci_key, default)
-    if auto_build_channels.get(lp_key) != new_value:
-        logger.info('Updating %s channel from %s to %s',
-                    lp_key,
-                    auto_build_channels.get(lp_key),
-                    new_value)
-        auto_build_channels[lp_key] = new_value
-        return True
-    else:
-        logger.debug('auto build channel %s has not changed', lp_key)
+    :param auto_build_keys: list of tuples where each tuple contains the key
+                            that should be accessed from the
+                            auto_build_channels map, the key that should be
+                            accessed from the project_vars map and finally a
+                            default value if the key is not found in
+                            project_vars.
+    :returns: A new dictionary with the updated values.
 
-    return False
+    """
+    new_auto_build_channel = deepcopy(auto_build_channels)
+    for lp_key, osci_key, default in auto_build_keys:
+        new_value = project_vars.get(osci_key, default)
+        if auto_build_channels.get(lp_key) != new_value:
+            logger.debug('%s channel from %s to %s',
+                         lp_key,
+                         auto_build_channels.get(lp_key),
+                         new_value)
+            new_auto_build_channel[lp_key] = new_value
+
+    return new_auto_build_channel
 
 
 def setup_parser(subparser: argparse.ArgumentParser):
@@ -199,22 +224,21 @@ def main(args: argparse.Namespace,
         except IndexError:
             logger.error('Recipe %s not found in %s',
                          recipe_name, charm_project)
+            # TODO(freyes): handle recipe creation when the recipe was not
+            # found, this would greatly enhance the developer experience when
+            # cutting new stable releases.
             sys.exit(2)
 
         auto_build_channels = lp_recipe.auto_build_channels
-        lp_changed = False
-        for lp_key, osci_key, default in LIST_AUTO_BUILD_CHANNELS:
-            if update_auto_build_channel_if_needed(
-                    auto_build_channels,
-                    lp_key,
-                    project_vars,
-                    osci_key,
-                    default):
-                lp_changed = True
-
-        if lp_changed:
+        new_auto_build_channels = gen_auto_build_channel(
+            auto_build_channels, project_vars, LIST_AUTO_BUILD_CHANNELS)
+        diff = diff_auto_build_channels(auto_build_channels,
+                                        new_auto_build_channels)
+        if diff:
+            logger.info('The auto build channels have changed: %s',
+                        pprint.pformat(diff))
             if args.i_really_mean_it:
-                lp_recipe.auto_build_channels = auto_build_channels
+                lp_recipe.auto_build_channels = new_auto_build_channels
                 lp_recipe.lp_save()
                 logger.info('LP recipe updated successfully.')
             else:
