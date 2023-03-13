@@ -1,4 +1,5 @@
 flake8
+pydocstyle
 mypy
 pytest
 requests-mock
