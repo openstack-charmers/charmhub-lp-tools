@@ -626,22 +626,15 @@ class CharmProject:
         self._add_branches(config.get('branches', {}))
 
     def _add_branches(self, branches_spec: Dict[str, Dict]) -> None:
-        default_branch_info = {
-            'auto-build': True,
-            'upload': True,
-            'recipe-name': '{project}.{branch}.{track}'
-        }
         for branch, branch_info in branches_spec.items():
             ref = f'refs/heads/{branch}'
-            if ref not in self.branches:
-                self.branches[ref] = dict(default_branch_info)
             if type(branch_info) != dict:
                 raise ValueError(f'{self.charmhub_name}\n'
                                  f'Expected a dict for key branches, '
                                  f' instead got {type(branch_info)} - '
                                  f' {branch_info}')
-
-            self.branches[ref].update(branch_info)
+            assert ref not in self.branches.keys()
+            self.branches[ref] = branch_info
 
         # clear cached channels
         self._channels = None
