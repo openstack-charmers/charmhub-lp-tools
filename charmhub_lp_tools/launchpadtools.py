@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Logic to handle Launchpad API objects."""
 
 import logging
 import functools
@@ -37,7 +38,7 @@ except AttributeError:
 
 
 def setup_logging(loglevel: str) -> None:
-    """Sets up some basic logging."""
+    """Set up some basic logging."""
     logger.setLevel(getattr(logging, loglevel, 'ERROR'))
 
 
@@ -65,6 +66,7 @@ class LaunchpadTools:
 
     @staticmethod
     def no_credential() -> None:
+        """Event handler when LP credentials could not be saved."""
         logging.error("Couldn't save/store the Launchpad credential")
         sys.exit(1)
 
@@ -100,8 +102,7 @@ class LaunchpadTools:
             owner: TypeLPObject,
             project: TypeLPObject
     ) -> TypeLPObject:
-        """Returns the reference to the Launchpad git repository by owner and
-        project.
+        """Get the reference to the LP git repository by owner and project.
 
         Return the first reference to a Launchpad git repository which is
         owned by the specified owner for the given project. If multiple
@@ -127,8 +128,10 @@ class LaunchpadTools:
                           project: TypeLPObject,
                           url: str
                           ) -> TypeLPObject:
-        """Creates a repository in Launchpad imported from the specified url
-        belonging to the specified owner and project.
+        """Create a repository in Launchpad imported from the specified url.
+
+        The object created is associated to the specified ``owner`` and
+        ``project``.
 
         :param owner: the owner of the repository
         :type owner: a launchpad team
@@ -137,6 +140,7 @@ class LaunchpadTools:
         :param url: the url to the repository to import from
         :type url: str
         :returns: the reference to the Launchpad git repository
+
         """
         logger.info('Importing git repository from %s into project '
                     '%s for user %s',
@@ -160,8 +164,7 @@ class LaunchpadTools:
                           owner: TypeLPObject,
                           project: TypeLPObject
                           ) -> List[TypeLPObject]:
-        """Returns charm recipes for the specified owner in the specified
-        project.
+        """Get charm recipes for the specified owner in the specified project.
 
         Returns all charm recipes owned by the specified owner for the given
         project. Note, this is necessary as Launchpad does not have an API
@@ -191,12 +194,14 @@ class LaunchpadTools:
             store_channels: Optional[List[str]] = None,
             store_upload: bool = False,
     ) -> bool:
-        """Updates the charm_recipe to match the requested configuration in
-        the track_info.
+        """Update the charm_recipe.
+
+        The update is made to match the requested configuration in the
+        ``branch_info``.
 
         :param recipe: the charm recipe to update
         :param branch_info: the branch_info dictionary containing information
-                           for the recipe
+                            for the recipe
         :return: True if updated, False otherwise
         """
         changed, updated_dict, changes = self.diff_charm_recipe(
@@ -227,7 +232,7 @@ class LaunchpadTools:
             store_channels: Optional[List[str]] = None,
             store_upload: bool = False,
     ) -> Tuple[bool, Dict[str, Any], List[str]]:
-        """Returns Updates the charm_recipe to match the required config.
+        """Get the updates the charm_recipe needs to match the required config.
 
         :param recipe: the charm recipe to update
         :param branch_info: the branch_info dictionary containing information

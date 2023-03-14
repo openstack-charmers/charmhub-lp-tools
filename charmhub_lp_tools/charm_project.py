@@ -1,16 +1,17 @@
 # Copyright 2021 Canonical
-
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-
+#
 # http://www.apache.org/licenses/LICENSE-2.0
-
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Logic to handle charms definitions."""
 
 import collections
 import json
@@ -56,7 +57,7 @@ requests_session = requests_cache.CachedSession(':memory:')
 
 
 def setup_logging(loglevel: str) -> None:
-    """Sets up some basic logging."""
+    """Set up some basic logging."""
     logger.setLevel(getattr(logging, loglevel, 'ERROR'))
 
 
@@ -97,9 +98,10 @@ def run_charmcraft(
 
 
 class CharmChannel:
+    """Abstraction of a charm's channel in Charmhub."""
 
     def __init__(self, project: 'CharmProject', name: str):
-        """Initialse the CharmChannel object
+        """Initialse the CharmChannel object.
 
         :param project: the project that this charm channel is associated with
         :param name: the channel name (track or track/risk)
@@ -125,6 +127,7 @@ class CharmChannel:
 
     @property
     def channel_map(self):
+        """Charmhub channel map."""
         return self.project.charmhub_channel_map
 
     def close(
@@ -648,6 +651,7 @@ class CharmProject:
 
     @property
     def raw_charm_info(self):
+        """Raw charm info as published by charmhub ``/info` endpoint."""
         if not self._raw_charm_info:
             self._raw_charm_info = requests.get(
                 self.INFO_URL.format(charm=self.charmhub_name)
@@ -656,6 +660,7 @@ class CharmProject:
 
     @property
     def charmhub_channel_map(self):
+        """Charmhub channel map."""
         try:
             self.raw_charm_info.encoding = 'utf-8'
             m = json.loads(self.raw_charm_info.text.strip())
@@ -687,6 +692,7 @@ class CharmProject:
 
     @property
     def channels(self) -> Set[CharmChannel]:
+        """List of channels declared by this charm."""
         if not self._channels:
             self._channels = set()
             for value in self.branches.values():
@@ -697,6 +703,7 @@ class CharmProject:
 
     @property
     def tracks(self) -> Set[str]:
+        """List of tracks declared by this charm."""
         return set([c.track for c in self.channels])
 
     @property
@@ -1172,8 +1179,7 @@ class CharmProject:
     def show_lauchpad_config(self,
                              file: IO = sys.stdout
                              ) -> None:
-        """Print out the launchpad config for the charms, if any.
-        """
+        """Print out the launchpad config for the charms, if any."""
         logger.info(f'Printing launchpad info for: {self.name}')
         try:
             self.lp_project

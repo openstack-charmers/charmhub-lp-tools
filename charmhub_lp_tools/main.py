@@ -1,18 +1,16 @@
 # Copyright 2021 Canonical
-
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-
+#
 # http://www.apache.org/licenses/LICENSE-2.0
-
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
-
 """Tools to configure and manage repositories and launchpad builders.
 
 This file contains a command that provides the ability to configure and manage
@@ -82,6 +80,8 @@ NOW = datetime.now(tz=ZoneInfo("UTC"))
 
 
 class FileConfig(NamedTuple):
+    """Holds configuration information."""
+
     config_dir: Optional[str] = None
     log_level: Optional[str] = None
     ignore_errors: bool = False
@@ -1077,7 +1077,7 @@ def repair_resource(args: argparse.Namespace,
 def validate_config_main(args: argparse.Namespace,
                          gc: GroupConfig,
                          ):
-    """Validate configuration files based on the schema"""
+    """Validate configuration files based on the schema."""
     # This subcommand is a NOOP, if the execution reached to this point it
     # means the configuration was loaded successfully and validated correctly
     # by the schema, so there is no need do anything else than inform the user
@@ -1086,7 +1086,7 @@ def validate_config_main(args: argparse.Namespace,
 
 
 def setup_logging(loglevel: str) -> None:
-    """Sets up some basic logging."""
+    """Set up some basic logging."""
     logging.basicConfig(format=LOGGING_FORMAT)
     logger.setLevel(getattr(logging, loglevel, 'ERROR'))
     cp_setup_logging(loglevel)
@@ -1095,7 +1095,7 @@ def setup_logging(loglevel: str) -> None:
 
 
 def main(argv: Optional[List[str]] = None):
-    """Main entry point.
+    """Provide the main entry point.
 
     :param argv: The list of command line arguments to parse.
     """
