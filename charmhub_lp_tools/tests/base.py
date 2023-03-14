@@ -53,3 +53,5 @@ class BaseTest(unittest.TestCase):
         with open(os.path.join(os.path.dirname(__file__), 'fixtures',
                                'awesome-info.json')) as f:
             self.awesome_info = json.load(f)
+        self.lp_builder_config = os.path.join(os.path.dirname(__file__),
+                                              'fixtures', 'lp-builder-config')

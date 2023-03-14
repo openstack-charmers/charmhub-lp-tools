@@ -16,20 +16,24 @@
 """Charmhub LP Tools error classes."""
 
 
+class BranchNotFound(Exception):
+    """Branch not found."""
+
+
 class CharmcraftError504(Exception):
     """charmcraft failed with a error 504 from charmhub."""
+
+
+class CharmNameNotFound(Exception):
+    """Charm name not found."""
 
 
 class InvalidRiskLevel(Exception):
     """Invalid risk level."""
 
 
-class BranchNotFound(Exception):
-    """Branch not found."""
-
-
-class CharmNameNotFound(Exception):
-    """Charm name not found."""
+class InvalidSeriesName(Exception):
+    """Invalid series name."""
 
 
 class ProjectVarsNotFound(Exception):

@@ -8,6 +8,7 @@ import requests_mock
 
 from charmhub_lp_tools import charm_project
 from charmhub_lp_tools.exceptions import CharmcraftError504
+from charmhub_lp_tools.schema import DEFAULT_SERIES_STATUS
 from charmhub_lp_tools.tests.base import BaseTest
 
 
@@ -47,6 +48,93 @@ class TestCharmProject(BaseTest):
                 self.assertNotIn('xena', recipe.name)
 
             self.assertEqual(num_total_builds, expected_total_builds)
+
+    def test_ensure_series(self):
+        dry_run = False
+        branch_info = {}
+        branch_info['jammy'] = {'enabled': True,
+                                'series-active': True,
+                                'series-summary': 'my summary',
+                                'series-status': DEFAULT_SERIES_STATUS,
+                                'series-title': 'my title'}
+        branch_info['focal'] = {'enabled': False,
+                                'series-active': True,
+                                'series-summary': None,
+                                'series-status': DEFAULT_SERIES_STATUS,
+                                'series-title': None}
+        branch_info['master'] = {'enabled': True,
+                                 'series-active': True,
+                                 'series-summary': None,
+                                 'series-status': DEFAULT_SERIES_STATUS,
+                                 'series-title': None}
+
+        with mock.patch.object(self.project, 'create_series') as create_series:
+            fake_series = mock.MagicMock()
+            create_series.return_value = fake_series
+            master = mock.MagicMock()
+            master.__getitem__.side_effect = branch_info['master'].__getitem__
+            jammy = mock.MagicMock()
+            jammy.__getitem__.side_effect = branch_info['jammy'].__getitem__
+            focal = mock.MagicMock()
+            focal.__getitem__.side_effect = branch_info['focal'].__getitem__
+
+            self.project._lp_series = {}
+            self.project.branches = {
+                'refs/heads/master': master,
+                'refs/heads/stable/jammy': jammy,
+                'refs/heads/stable/focal': focal,
+            }
+            result = self.project.ensure_series(['stable/jammy'],
+                                                dry_run=dry_run)
+            self.assertEqual(result, {'jammy': fake_series})
+            self.project.create_series.assert_called_with(
+                'jammy', branch_info['jammy']['series-summary'], dry_run)
+            fake_series.lp_save.assert_called_with()
+            self.assertEqual(fake_series.active,
+                             branch_info['jammy']['series-active'])
+            self.assertEqual(fake_series.status,
+                             branch_info['jammy']['series-status'])
+            self.assertEqual(fake_series.title,
+                             branch_info['jammy']['series-title'])
+            self.assertEqual(fake_series.summary,
+                             branch_info['jammy']['series-summary'])
+
+    def test_create_series(self):
+        with mock.patch.object(self.project, 'log') as log:
+            self.assertEqual(self.project.create_series('my-series',
+                                                        'my shiny summary',
+                                                        dry_run=True),
+                             None)
+            log.info.assert_called_with(('NOT creating the series %s with '
+                                         'summary %s (dry-run mode)'),
+                                        'my-series', 'my shiny summary')
+
+        with mock.patch.object(self.project, 'lpt') as lpt:
+            fake_series = mock.MagicMock()
+            lpt.create_project_series.return_value = fake_series
+            series = self.project.create_series('my-series',
+                                                'my shiny new summary',
+                                                dry_run=False)
+            lpt.create_project_series.assert_called_with(
+                self.project.lp_project,
+                name='my-series',
+                summary='my shiny new summary')
+            self.assertEqual(series, fake_series)
+
+    def test_lp_series(self):
+        s_trunk = mock.MagicMock()
+        s_trunk.name = 'trunk'
+        s_jammy = mock.MagicMock()
+        s_jammy.name = 'jammy'
+        s_focal = mock.MagicMock()
+        s_focal.name = 'focal'
+
+        with mock.patch.object(self.project, '_lp_project') as _lp_project:
+            _lp_project.series = [s_trunk, s_jammy, s_focal]
+            self.assertEqual(self.project.lp_series,
+                             {'jammy': s_jammy,
+                              'trunk': s_trunk,
+                              'focal': s_focal})
 
     def _gen_recipes_and_builds(self):
         recipes = []

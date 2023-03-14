@@ -15,13 +15,31 @@
 
 from schema import (
     Optional,
+    Or,
     Regex,
     Schema,
 )
 
 _CHARMHUB_NAME = Regex(r'^[a-z][a-z0-9_\-]+$')
 _LP_NAME = Regex(r'^[a-z][a-z0-9_\-]+$')
+_PROJECT_SERIES_STATUS = Or("Experimental",
+                            "Active Development",
+                            "Pre-release Freeze",
+                            "Current Stable Release",
+                            "Supported",
+                            "Obsolete",
+                            "Future",
+                            only_one=True)
 
+_SERIES_TITLE_DESC = "The product series title. Should be just a few words."
+_SERIES_STATUS_DESC = ("Whether or not this series is stable and supported, "
+                       "or under current development. This excludes series "
+                       "which are experimental or obsolete.")
+_SERIES_SUMMARY_DESC = ('A single paragraph that explains the goals of of '
+                        'this series and the intended users. For example: '
+                        '"The yoga series represents the current stable '
+                        'series, and is recommended for all new deployments".')
+DEFAULT_SERIES_STATUS = "Active Development"
 
 config_schema = Schema({
     "defaults": {
@@ -33,6 +51,22 @@ config_schema = Schema({
                 Optional("enabled", default=True): bool,
                 Optional("bases"): [str],
                 Optional("duplicate-channels"): [str],
+                Optional(
+                    "series-title",
+                    default=None,
+                    description=_SERIES_TITLE_DESC
+                ): str,
+                Optional(
+                    "series-summary",
+                    default=None,
+                    description=_SERIES_SUMMARY_DESC
+                ): str,
+                Optional("series-active", default=True): bool,
+                Optional(
+                    "series-status",
+                    default=DEFAULT_SERIES_STATUS,
+                    description=_SERIES_STATUS_DESC
+                ): _PROJECT_SERIES_STATUS,
                 Optional("auto-build", default=True): bool,
                 Optional("upload", default=True): bool,
                 Optional("recipe-name",
@@ -53,6 +87,22 @@ config_schema = Schema({
                 Optional("enabled", default=True): bool,
                 Optional("bases"): [str],
                 Optional("duplicate-channels"): [str],
+                Optional(
+                    "series-title",
+                    default=None,
+                    description=_SERIES_TITLE_DESC
+                ): str,
+                Optional(
+                    "series-summary",
+                    default=None,
+                    description=_SERIES_SUMMARY_DESC
+                ): str,
+                Optional("series-active", default=True): bool,
+                Optional(
+                    "series-status",
+                    default=DEFAULT_SERIES_STATUS,
+                    description=_SERIES_STATUS_DESC
+                ): _PROJECT_SERIES_STATUS,
                 Optional("auto-build", default=True): bool,
                 Optional("upload", default=True): bool,
                 Optional("recipe-name",

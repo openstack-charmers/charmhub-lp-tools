@@ -5,6 +5,7 @@
    charmhub
    charm_project
    constants
+   ensure_series
    exceptions
    gitutils
    group_config
