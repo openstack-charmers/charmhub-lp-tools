@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Logic behince the ``osci-sync`` subcommand."""
 
 import argparse
 import logging
@@ -57,8 +58,7 @@ logger = logging.getLogger(__name__)
 
 def diff_auto_build_channels(lp_auto_build_channels: Dict[str, str],
                              local_auto_build_channels: Dict[str, str]):
-    """
-    Obtain the differences between auto build channels maps.
+    """Obtain the differences between auto build channels maps.
 
     The differences are obtained using the symmetic difference operation from
     sets.
@@ -167,6 +167,7 @@ def gen_auto_build_channel(auto_build_channels: Dict[str, Any],
 
 
 def setup_parser(subparser: argparse.ArgumentParser):
+    """Set up arguments parser for the CLI."""
     parser = subparser.add_parser(
         'osci-sync',
         help='Sync the config defined in osci.yaml to Launchpad.',
@@ -194,6 +195,7 @@ def setup_parser(subparser: argparse.ArgumentParser):
 def osci_sync(args: argparse.Namespace,
               gc: GroupConfig,
               ) -> None:
+    """Provide the main entry point for the ``osci-sync`` subcommand."""
     logger.setLevel(getattr(logging, args.loglevel, 'ERROR'))
     git_repo = git.Repo(args.repo_dir, search_parent_directories=True)
     osci = load_osci_yaml(git_repo)

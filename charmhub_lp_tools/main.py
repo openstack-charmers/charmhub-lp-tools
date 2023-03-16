@@ -1,18 +1,16 @@
 # Copyright 2021 Canonical
-
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-
+#
 # http://www.apache.org/licenses/LICENSE-2.0
-
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
-
 """Tools to configure and manage repositories and launchpad builders.
 
 This file contains a command that provides the ability to configure and manage
@@ -82,6 +80,8 @@ NOW = datetime.now(tz=ZoneInfo("UTC"))
 
 
 class FileConfig(NamedTuple):
+    """Holds configuration information."""
+
     config_dir: Optional[str] = None
     log_level: Optional[str] = None
     ignore_errors: bool = False
@@ -118,18 +118,18 @@ def get_file_config() -> FileConfig:
         ignore_errors=bool(config_items.get('ignore_errors', False)))
 
 
-def check_config_dir_exists(dir_: pathlib.Path) -> pathlib.Path:
-    """Validate that the config dir_ exists.
+def check_config_dir_exists(dirpath: pathlib.Path) -> pathlib.Path:
+    """Validate that the config dirpath exists.
 
     Raises FileNotFoundError if it doesn't.
 
-    :param dir_: the config path that needs to exist.
+    :param dirpath: the config path that needs to exist.
     :raises: FileNotFoundError if the configuration directory doesn't exist.
     """
-    if not dir_.exists():
+    if not dirpath.exists():
         raise FileNotFoundError(
-            f'Configuration directory "{dir_}" does not exist')
-    return dir_
+            f'Configuration directory "{dirpath}" does not exist')
+    return dirpath
 
 
 def get_group_config_filenames(config_dir: pathlib.Path,
@@ -138,7 +138,7 @@ def get_group_config_filenames(config_dir: pathlib.Path,
                                ) -> List[pathlib.Path]:
     """Fetch the list of files for the group config.
 
-    Depending on whether :param:`project_group_names` is passed, get the list
+    Depending on whether ``project_group_names`` is passed, get the list
     of files that contain the projects that need configuring.
 
     :param config_dir: the directory to look in
@@ -871,7 +871,7 @@ def request_code_import(args: argparse.Namespace,
     """Request a code import on Launchpad.
 
     :param args: the arguments parsed from the command line.
-    :para gc: The GroupConfig; i.e. all the charms and their config.
+    :param gc: The GroupConfig; i.e. all the charms and their config.
     """
     for cp in gc.projects(select=args.charms):
         cp.request_code_import(dry_run=not args.confirmed)
@@ -884,7 +884,7 @@ def copy_channel(args: argparse.Namespace,
     """Copy the charms released from a channel to another one.
 
     :param args: the arguments parsed from the command line.
-    :para gc: The GroupConfig; i.e. all the charms and their config.
+    :param gc: The GroupConfig; i.e. all the charms and their config.
     :returns: a dictionary of charm name -> revisions released.
     """
     cp_revs = {}
@@ -931,7 +931,7 @@ def ch_report_main(args: argparse.Namespace,
     """Generate report of published charms.
 
     :param args: the arguments parsed from the command line.
-    :para gc: The GroupConfig; i.e. all the charms and their config.
+    :param gc: The GroupConfig; i.e. all the charms and their config.
     """
     klass = get_charmhub_report_klass(args.format)
     report = klass(args.output)
@@ -968,7 +968,7 @@ def clean_channel(args: argparse.Namespace,
     """Clean a channel by keeping charm revisions specified by bases.
 
     :param args: the arguments parsed from the command line.
-    :para gc: The GroupConfig; i.e. all the charms and their config.
+    :param gc: The GroupConfig; i.e. all the charms and their config.
     """
     for cp in gc.projects(select=args.charms):
         src_channel = CharmChannel(cp, args.src_channel)
@@ -996,7 +996,7 @@ def copy_revisions(args: argparse.Namespace,
     then the command will fail:
 
     :param args: the arguments parsed from the command line.
-    :para gc: The GroupConfig; i.e. all the charms and their config.
+    :param gc: The GroupConfig; i.e. all the charms and their config.
     """
     assert args.from_risk != args.to_risk, "Can't copy from/to same risk"
     for cp in gc.projects(select=args.charms):
@@ -1024,7 +1024,7 @@ def close_channel(args: argparse.Namespace,
     (although note that there is a clean-channel command for that purpose).
 
     :param args: the arguments parsed from the command line.
-    :para gc: The GroupConfig; i.e. all the charms and their config.
+    :param gc: The GroupConfig; i.e. all the charms and their config.
     """
     for cp in gc.projects(select=args.charms):
         try:
@@ -1055,7 +1055,7 @@ def repair_resource(args: argparse.Namespace,
     that case it'll need to be done manually.
 
     :param args: the arguments parsed from the command line.
-    :para gc: The GroupConfig; i.e. all the charms and their config.
+    :param gc: The GroupConfig; i.e. all the charms and their config.
     """
     for cp in gc.projects(select=args.charms):
         if '/' in args.channel:
@@ -1077,7 +1077,7 @@ def repair_resource(args: argparse.Namespace,
 def validate_config_main(args: argparse.Namespace,
                          gc: GroupConfig,
                          ):
-    """Validate configuration files based on the schema"""
+    """Validate configuration files based on the schema."""
     # This subcommand is a NOOP, if the execution reached to this point it
     # means the configuration was loaded successfully and validated correctly
     # by the schema, so there is no need do anything else than inform the user
@@ -1086,7 +1086,7 @@ def validate_config_main(args: argparse.Namespace,
 
 
 def setup_logging(loglevel: str) -> None:
-    """Sets up some basic logging."""
+    """Set up some basic logging."""
     logging.basicConfig(format=LOGGING_FORMAT)
     logger.setLevel(getattr(logging, loglevel, 'ERROR'))
     cp_setup_logging(loglevel)
@@ -1095,7 +1095,7 @@ def setup_logging(loglevel: str) -> None:
 
 
 def main(argv: Optional[List[str]] = None):
-    """Main entry point.
+    """Provide the main entry point.
 
     :param argv: The list of command line arguments to parse.
     """

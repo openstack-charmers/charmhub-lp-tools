@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Logic to manage groups of charms as defined in lp-builder-config."""
 
 import collections
 import logging
@@ -115,7 +116,7 @@ class GroupConfig:
 
     def projects(self, select: Optional[List[str]] = None,
                  ) -> Iterator[CharmProject]:
-        """Generator returns a list of projects."""
+        """Generate a list of projects."""
         if not (select):
             select = None
         for project in self.charm_projects.values():

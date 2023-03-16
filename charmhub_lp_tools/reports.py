@@ -1,3 +1,23 @@
+#
+# Copyright (C) 2023 Canonical Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+# implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+"""Logic to generate reports.
+
+The two sources of information to produce the reports are Launchpad and
+Charmhub.
+"""
 import abc
 import collections
 import io
@@ -32,6 +52,8 @@ NOW = datetime.now(tz=ZoneInfo("UTC"))
 
 
 class BaseReport(abc.ABC):
+    """Abstract class to implement a report."""
+
     @property
     def templates_dirs(self):
         """List of directories that contain templates."""
@@ -49,7 +71,7 @@ class BaseReport(abc.ABC):
 
 
 class BaseBuildsReport(BaseReport):
-    """Base class report"""
+    """Base class for builds report."""
 
     def __init__(self, output: str = None):
         """Initialize base report."""
@@ -72,6 +94,8 @@ class BaseBuildsReport(BaseReport):
 
 
 class HtmlBuildsReport(BaseBuildsReport):
+    """Specialized class to implement HTML reports."""
+
     def __init__(self, output):
         super().__init__(output)
         # {'openstack': {'yoga': {'edge': [<build>, <build>,...]}}}
@@ -84,6 +108,7 @@ class HtmlBuildsReport(BaseBuildsReport):
         )
 
     def add_build(self, charm_project, recipe, build):
+        """Add a build to the report."""
         # the same build could have been used to be released into multiple
         # channels.
         for channel in recipe.store_channels:
@@ -93,6 +118,7 @@ class HtmlBuildsReport(BaseBuildsReport):
             )
 
     def generate(self):
+        """Generate a report and write to ``self.output``."""
         reports_written = collections.defaultdict(
             lambda: collections.defaultdict(dict)
         )
@@ -132,6 +158,8 @@ class HtmlBuildsReport(BaseBuildsReport):
 
 
 class PlainBuildsReport(BaseBuildsReport):
+    """Specialized class to implement plain text reports of builds."""
+
     def __init__(self, output: str = None):
         """Initialize plain builds report."""
         super().__init__(output)
@@ -142,6 +170,7 @@ class PlainBuildsReport(BaseBuildsReport):
         self.t.align = 'l'  # align to the left.
 
     def add_build(self, charm_project, recipe, build):
+        """Add a build to the report."""
         build_arch_tag = build.distro_arch_series.architecture_tag
         series_arch = f'{build.distro_series.name}/{build_arch_tag}'
         if build.buildstate != 'Successfully built':
@@ -175,16 +204,20 @@ class PlainBuildsReport(BaseBuildsReport):
         self.t.add_row(row)
 
     def generate(self):
+        """Generate a report and print it to stdout."""
         print(self.t.get_string(sort_key=operator.itemgetter(0, 1, 2),
                                 sortby="Recipe Name"))
 
 
 class JSONBuildsReport(BaseBuildsReport):
+    """Specialized class to implement a report of builds in JSON."""
+
     def __init__(self, output):
         super().__init__(output)
         self.builds = collections.defaultdict(dict)
 
     def add_build(self, charm, recipe, build):
+        """Add a build to the report."""
         build_arch_tag = build.distro_arch_series.architecture_tag
         series_arch = f'{build.distro_series.name}/{build_arch_tag}'
         self.builds[recipe.name][series_arch] = {
@@ -201,6 +234,7 @@ class JSONBuildsReport(BaseBuildsReport):
         }
 
     def generate(self):
+        """Generate a report and print it to stdout."""
         print(json.dumps(self.builds, default=str))
 
 
@@ -235,6 +269,7 @@ class BaseCharmhubReport(BaseReport):
 
     @abc.abstractmethod
     def generate(self):
+        """Generate a report and write it to ``self.output``."""
         raise NotImplementedError()
 
 
@@ -244,6 +279,7 @@ class HtmlCharmhubReport(BaseCharmhubReport):
     DEFAULT_OUTPUT = "./report"
 
     def generate(self):
+        """Generate a report and write it to ``self.output``."""
         reports_written = collections.defaultdict(dict)
         os.makedirs(self.output, exist_ok=True)
         env = self._get_jinja2_env()
@@ -275,6 +311,8 @@ class HtmlCharmhubReport(BaseCharmhubReport):
 
 
 class JSONCharmhubReport(BaseCharmhubReport):
+    """Specialized class to generate Charmhub reports in JSON."""
+
     DEFAULT_OUTPUT = sys.stdout
 
     def __init__(self, output: Optional[Union[str, io.RawIOBase]]):
@@ -284,10 +322,12 @@ class JSONCharmhubReport(BaseCharmhubReport):
             super().__init__(output)
 
     def generate(self):
+        """Generate a report and write it to ``self.output``."""
         print(json.dumps(self.revisions, default=str), file=self.output)
 
 
 class PlainCharmhubReport(BaseCharmhubReport):
+    """Specialized class to implement charmhub report in plain text."""
 
     DEFAULT_OUTPUT = sys.stdout
 
@@ -312,6 +352,7 @@ class PlainCharmhubReport(BaseCharmhubReport):
         return t
 
     def generate(self):
+        """Generate a report and write it to ``self.output``."""
         for project_group, tracks in self.revisions.items():
             for track, charms in tracks.items():
                 pg_table = self.init_table()

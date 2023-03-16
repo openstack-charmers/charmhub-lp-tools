@@ -11,8 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
-# Tools to work with the charmhub.
+"""Tools to work with the charmhub."""
 
 
 import logging
@@ -31,11 +30,12 @@ _charmhub_client: Optional[httpbakery.Client] = None
 
 
 def setup_logging(loglevel: str) -> None:
-    """Sets up some basic logging."""
+    """Set up some basic logging."""
     logger.setLevel(getattr(logging, loglevel, 'ERROR'))
 
 
 def get_charmhub_client() -> httpbakery.Client:
+    """Get a Charmhub API client object."""
     global _charmhub_client
     if _charmhub_client is None:
         _charmhub_client = httpbakery.Client()
@@ -64,12 +64,18 @@ def authorize_from_macaroon_dict(auth_data: Dict) -> str:
 
 
 class CharmhubConfig:
+    """Charmhub configuration."""
+
     api_url = "https://api.charmhub.io"
     storage_url = "https://storage.snapcraftcontent.com"
     registry_url = "https://registry.jujucharms.com"
 
 
-def get_store_client():
+def get_store_client() -> store.Store:
+    """Get Charmhub store API client.
+
+    :returns: a Store instance logged in to Charmhub.
+    """
     config = CharmhubConfig()
     mystore = store.Store(config)
 
