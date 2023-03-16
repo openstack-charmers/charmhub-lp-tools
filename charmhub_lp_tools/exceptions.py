@@ -11,4 +11,8 @@ class BranchNotFound(Exception):
 
 
 class CharmNameNotFound(Exception):
-    """Charm name not found declared in osci.yaml"""
+    """Charm name not found."""
+
+
+class ProjectVarsNotFound(Exception):
+    """project.vars section not found."""

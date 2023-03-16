@@ -83,13 +83,13 @@ class TestOsciSync(unittest.TestCase):
         osci_sync.setup_parser(subparser)
         self.assertIn('osci-sync', subparser.choices)
         self.assertEqual(subparser.choices['osci-sync'].get_default('func'),
-                         osci_sync.main)
+                         osci_sync.osci_sync)
         self.assertIn('--i-really-mean-it',
                       subparser.choices['osci-sync'].format_help())
 
     @mock.patch.object(osci_sync, 'logger')
     @mock.patch('git.Repo')
-    def test_main(self, Repo, logger):
+    def test_osci_sync(self, Repo, logger):
         args = mock.MagicMock()
         args.loglevel = 'DEBUG'
         args.repo_dir = self.fake_repo_path
@@ -110,7 +110,7 @@ class TestOsciSync(unittest.TestCase):
         charm_project.lpt.get_charm_recipes.return_value = recipes
         gc.projects.return_value = [charm_project]
 
-        osci_sync.main(args, gc)
+        osci_sync.osci_sync(args, gc)
         logger.info.assert_any_call('Using recipe %s', recipe.web_link)
         logger.info.assert_any_call(
             'The auto build channels have changed: %s',
@@ -125,7 +125,7 @@ class TestOsciSync(unittest.TestCase):
         recipe.web_link = 'https://example.com/charm-fake/%s' % recipe.name
         recipe.auto_build_channels = {'core18': 'latest/edge'}
         args.i_really_mean_it = True
-        osci_sync.main(args, gc)
+        osci_sync.osci_sync(args, gc)
         self.assertDictEqual(recipe.auto_build_channels,
                              {'core18': 'latest/edge',
                               'charmcraft': '2.0/stable'})
@@ -139,7 +139,7 @@ class TestOsciSync(unittest.TestCase):
                 self.assertEqual(code, 2)
                 raise SystemExit(2)
             sys_exit.side_effect = fake_exit
-            self.assertRaises(SystemExit, osci_sync.main, args, gc)
+            self.assertRaises(SystemExit, osci_sync.osci_sync, args, gc)
             logger.error.assert_any_call('Recipe %s not found in %s',
                                          'charm-fake.stable-jammy.22.04',
                                          charm_project)

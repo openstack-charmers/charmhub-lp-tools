@@ -31,9 +31,11 @@ from typing import (
 from .charm_project import (
     CharmProject,
 )
-from .schema import config_schema
 from .launchpadtools import (
     LaunchpadTools,
+)
+from .schema import (
+    config_schema,
 )
 
 
@@ -54,6 +56,7 @@ class GroupConfig:
                  files: List[pathlib.Path] = None) -> None:
         """Configure the GroupConfig object.
 
+        :param lpt: the launchpad tools object to do things in Launchpad.
         :param files: the list of files to load config from.
         """
         self.lpt = lpt

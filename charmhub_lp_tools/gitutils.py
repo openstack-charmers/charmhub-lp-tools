@@ -29,9 +29,12 @@ def get_branch_name(git_repo: git.Repo) -> str:
     """Get branch name from gitreview file.
 
     The branch name defined in the gitreview file in the 'defaultbranch'
-    section is used, if it's not set, then DEFAULT_BRANCH_MASTER is returned.
+    section is used, if it's not set, then the default branch name is returned
+    as returned by :func:`get_default_branch_name`
 
     :param git_repo: the repo to operate on.
+    :returns: the base branch name.
+
     """
     config = get_gitreview(git_repo)
     try:
@@ -45,6 +48,7 @@ def get_gitreview(git_repo: git.Repo) -> configparser.ConfigParser:
 
     :param git_repo: the repo to operate on.
     :returns: the content of the gitreview file parsed.
+    :raises: FileNotFoundError
     """
     config = configparser.ConfigParser()
     git_root = git_repo.git.rev_parse('--show-toplevel')

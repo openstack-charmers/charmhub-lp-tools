@@ -40,6 +40,7 @@ from .constants import (
 from .exceptions import (
     BranchNotFound,
     CharmNameNotFound,
+    ProjectVarsNotFound,
 )
 from .gitutils import (
     get_branch_name,
@@ -105,14 +106,14 @@ def get_charm_name(osci: OsciYamlType) -> str:
 
     :param osci: the osci configuration set in the repo.
     :returns: the charm name
+    :raises: CharmNameNotFound
     """
     try:
         vars_ = get_project_vars(osci)
         return vars_['charm_build_name']
-    except (TypeError, KeyError) as ex:
+    except ProjectVarsNotFound as ex:
         logger.warning('charm_build_name not found in osci.yaml: %s' % ex)
         raise CharmNameNotFound()
-    raise CharmNameNotFound()
 
 
 def get_project_vars(osci: OsciYamlType) -> Dict[str, Any]:
@@ -120,12 +121,15 @@ def get_project_vars(osci: OsciYamlType) -> Dict[str, Any]:
 
     :param osci: the osci configuration set in the repo.
     :returns: vars section
+    :raises: ProjectVarsNotFound
     """
     for section in osci:
-        if 'project' not in section:
-            continue
-
-        return section['project']['vars']
+        try:
+            return section['project']['vars']
+        except KeyError:
+            pass
+    else:
+        raise ProjectVarsNotFound()
 
 
 def gen_auto_build_channel(auto_build_channels: Dict[str, Any],
@@ -149,7 +153,7 @@ def gen_auto_build_channel(auto_build_channels: Dict[str, Any],
     :returns: A new dictionary with the updated values.
 
     """
-    new_auto_build_channel = deepcopy(auto_build_channels)
+    new_auto_build_channels = deepcopy(auto_build_channels)
     for lp_key, osci_key, default in auto_build_keys:
         new_value = project_vars.get(osci_key, default)
         if auto_build_channels.get(lp_key) != new_value:
@@ -157,9 +161,9 @@ def gen_auto_build_channel(auto_build_channels: Dict[str, Any],
                          lp_key,
                          auto_build_channels.get(lp_key),
                          new_value)
-            new_auto_build_channel[lp_key] = new_value
+            new_auto_build_channels[lp_key] = new_value
 
-    return new_auto_build_channel
+    return new_auto_build_channels
 
 
 def setup_parser(subparser: argparse.ArgumentParser):
@@ -183,24 +187,25 @@ def setup_parser(subparser: argparse.ArgumentParser):
         help=('Path to the git repository where the charm is located at, by '
               'default it uses the current working directory.'),
     )
-    parser.set_defaults(func=main)
+    parser.set_defaults(func=osci_sync)
     return parser
 
 
-def main(args: argparse.Namespace,
-         gc: GroupConfig,
-         ) -> None:
+def osci_sync(args: argparse.Namespace,
+              gc: GroupConfig,
+              ) -> None:
     logger.setLevel(getattr(logging, args.loglevel, 'ERROR'))
     git_repo = git.Repo(args.repo_dir, search_parent_directories=True)
     osci = load_osci_yaml(git_repo)
     branch_name = get_branch_name(git_repo)
     charm_name = get_charm_name(osci)
     project_vars = get_project_vars(osci)
-    if not list(gc.projects(select=[charm_name])):
+    try:
+        charm_project = list(gc.projects(select=[charm_name]))[0]
+    except IndexError:
         logger.error("No charm '%s' found; is the name correct?", charm_name)
         sys.exit(1)
 
-    charm_project = list(gc.projects(select=[charm_name]))[0]
     try:
         branch = charm_project.branches[f'refs/heads/{branch_name}']
     except KeyError:
