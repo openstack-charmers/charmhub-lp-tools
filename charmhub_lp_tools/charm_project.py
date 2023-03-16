@@ -481,14 +481,13 @@ class CharmProject:
 
     The CharmProject is defined in a yaml file and has the following form:
 
-    name: the human friendly name of the project
-    charmhub: the charmhub store name
-    launchpad: the launchpad project name
-    team: the team who should own the branches and charm recipes
-    repo: a URL to the upstream repository to be mirrored in
-          launchpad
-    branches: a list of branch -> recipe_info mappings for charm recipes on
-            launchpad.
+    - name: the human friendly name of the project
+    - charmhub: the charmhub store name
+    - launchpad: the launchpad project name
+    - team: the team who should own the branches and charm recipes
+    - repo: a URL to the upstream repository to be mirrored in launchpad
+    - branches: a list of branch -> recipe_info mappings for charm recipes on
+      launchpad.
 
     The branch_info dictionary consists of the following keys:
 
@@ -524,49 +523,55 @@ class CharmProject:
     publishes the main branch to the latest/edge channel and the stable
     branch to the latest/stable channel:
 
-    name: Awesome Charm
-    charmhub: awesome
-    launchpad: charm-awesome
-    team: awesome-charmers
-    repo: https://github.com/canonical/charm-awesome-operator
-    branches:
-      main:
-        channels: latest/edge
-      stable:
-        channels: latest/stable
+    .. code:: yaml
+
+      name: Awesome Charm
+      charmhub: awesome
+      launchpad: charm-awesome
+      team: awesome-charmers
+      repo: https://github.com/canonical/charm-awesome-operator
+      branches:
+        main:
+          channels: latest/edge
+        stable:
+          channels: latest/stable
 
     The following example builds a charm using the latest/edge channel of
     charmcraft, and does not upload the results to the store
 
-    name: Awesome Charm
-    charmhub: awesome
-    launchpad: charm-awesome
-    team: awesome-charmers
-    repo: https://github.com/canonical/charm-awesome-operator
-    branches:
-      main:
-        store-upload: False
-        build-channels:
-          charmcraft: latest/edge
+    .. code:: yaml
+
+      name: Awesome Charm
+      charmhub: awesome
+      launchpad: charm-awesome
+      team: awesome-charmers
+      repo: https://github.com/canonical/charm-awesome-operator
+      branches:
+        main:
+          store-upload: False
+          build-channels:
+            charmcraft: latest/edge
 
     The following example builds a charm on the main branch of the git
     repository and publishes the results to the yoga/edge and latest/edge
     channels and builds a charm on the stable/xena branch of the git
     repository and publishes the results to xena/edge.
 
-    name: Awesome Charm
-    charmhub: awesome
-    launchpad: charm-awesome
-    team: awesome-charmers
-    repo: https://github.com/canonical/charm-awesome-operator
-    branches:
-      main:
-        channels:
-          - yoga/edge
-          - latest/edge
-      stable/xena:
-        channels:
-          - xena/edge
+    .. code: yaml
+
+      name: Awesome Charm
+      charmhub: awesome
+      launchpad: charm-awesome
+      team: awesome-charmers
+      repo: https://github.com/canonical/charm-awesome-operator
+      branches:
+        main:
+          channels:
+            - yoga/edge
+            - latest/edge
+        stable/xena:
+          channels:
+            - xena/edge
 
 
     The follow example builds a charm on the main branch of the git repository
@@ -576,23 +581,25 @@ class CharmProject:
     the 20.04 base, and any operations on the xena channel are duplicated to
     the victoria channel (e.g. copy, clean)
 
-    name: Awesome Charm
-    charmhub: awesome
-    launchpad: charm-awesome
-    team: awesome-charmers
-    repo: https://github.com/canonical/charm-awesome-operator
-    branches:
-      main:
-        channels:
-          - yoga/edge
-          - latest/edge
-      stable/xena:
-        channels:
-          - xena/edge
-        bases:
-          - "20.04"
-        duplicate-channels:
-          - victoria
+    .. code:: yaml
+
+      name: Awesome Charm
+      charmhub: awesome
+      launchpad: charm-awesome
+      team: awesome-charmers
+      repo: https://github.com/canonical/charm-awesome-operator
+      branches:
+        main:
+          channels:
+            - yoga/edge
+            - latest/edge
+        stable/xena:
+          channels:
+            - xena/edge
+          bases:
+            - "20.04"
+          duplicate-channels:
+            - victoria
     """
 
     INFO_URL = CHARMHUB_BASE + "/info/{charm}?fields=channel-map"
@@ -651,7 +658,7 @@ class CharmProject:
 
     @property
     def raw_charm_info(self):
-        """Raw charm info as published by charmhub ``/info` endpoint."""
+        """Raw charm info as published by charmhub ``/info`` endpoint."""
         if not self._raw_charm_info:
             self._raw_charm_info = requests.get(
                 self.INFO_URL.format(charm=self.charmhub_name)
@@ -1420,12 +1427,13 @@ class CharmProject:
         """Determine if the build is valid.
 
         A valid build a build that meets the following criteria:
-        - it's associated recipe has the attribute can_upload_to_store set to
+
+        * it's associated recipe has the attribute can_upload_to_store set to
           True, but the build has no store_upload_revision set, and the build
           is not in progress (states: currently build, uploading build or needs
           building)
-        - the build state is in any of: 'Failed to build', 'Failed to upload'.
-        - the associated recipe is stale.
+        * the build state is in any of: 'Failed to build', 'Failed to upload'.
+        * the associated recipe is stale.
 
         :param build: build to check if it is valid.
         :returns: True if the last build is valid.

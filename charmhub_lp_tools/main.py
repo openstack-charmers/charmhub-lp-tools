@@ -118,18 +118,18 @@ def get_file_config() -> FileConfig:
         ignore_errors=bool(config_items.get('ignore_errors', False)))
 
 
-def check_config_dir_exists(dir_: pathlib.Path) -> pathlib.Path:
-    """Validate that the config dir_ exists.
+def check_config_dir_exists(dirpath: pathlib.Path) -> pathlib.Path:
+    """Validate that the config dirpath exists.
 
     Raises FileNotFoundError if it doesn't.
 
-    :param dir_: the config path that needs to exist.
+    :param dirpath: the config path that needs to exist.
     :raises: FileNotFoundError if the configuration directory doesn't exist.
     """
-    if not dir_.exists():
+    if not dirpath.exists():
         raise FileNotFoundError(
-            f'Configuration directory "{dir_}" does not exist')
-    return dir_
+            f'Configuration directory "{dirpath}" does not exist')
+    return dirpath
 
 
 def get_group_config_filenames(config_dir: pathlib.Path,
@@ -138,7 +138,7 @@ def get_group_config_filenames(config_dir: pathlib.Path,
                                ) -> List[pathlib.Path]:
     """Fetch the list of files for the group config.
 
-    Depending on whether :param:`project_group_names` is passed, get the list
+    Depending on whether ``project_group_names`` is passed, get the list
     of files that contain the projects that need configuring.
 
     :param config_dir: the directory to look in
@@ -871,7 +871,7 @@ def request_code_import(args: argparse.Namespace,
     """Request a code import on Launchpad.
 
     :param args: the arguments parsed from the command line.
-    :para gc: The GroupConfig; i.e. all the charms and their config.
+    :param gc: The GroupConfig; i.e. all the charms and their config.
     """
     for cp in gc.projects(select=args.charms):
         cp.request_code_import(dry_run=not args.confirmed)
@@ -884,7 +884,7 @@ def copy_channel(args: argparse.Namespace,
     """Copy the charms released from a channel to another one.
 
     :param args: the arguments parsed from the command line.
-    :para gc: The GroupConfig; i.e. all the charms and their config.
+    :param gc: The GroupConfig; i.e. all the charms and their config.
     :returns: a dictionary of charm name -> revisions released.
     """
     cp_revs = {}
@@ -931,7 +931,7 @@ def ch_report_main(args: argparse.Namespace,
     """Generate report of published charms.
 
     :param args: the arguments parsed from the command line.
-    :para gc: The GroupConfig; i.e. all the charms and their config.
+    :param gc: The GroupConfig; i.e. all the charms and their config.
     """
     klass = get_charmhub_report_klass(args.format)
     report = klass(args.output)
@@ -968,7 +968,7 @@ def clean_channel(args: argparse.Namespace,
     """Clean a channel by keeping charm revisions specified by bases.
 
     :param args: the arguments parsed from the command line.
-    :para gc: The GroupConfig; i.e. all the charms and their config.
+    :param gc: The GroupConfig; i.e. all the charms and their config.
     """
     for cp in gc.projects(select=args.charms):
         src_channel = CharmChannel(cp, args.src_channel)
@@ -996,7 +996,7 @@ def copy_revisions(args: argparse.Namespace,
     then the command will fail:
 
     :param args: the arguments parsed from the command line.
-    :para gc: The GroupConfig; i.e. all the charms and their config.
+    :param gc: The GroupConfig; i.e. all the charms and their config.
     """
     assert args.from_risk != args.to_risk, "Can't copy from/to same risk"
     for cp in gc.projects(select=args.charms):
@@ -1024,7 +1024,7 @@ def close_channel(args: argparse.Namespace,
     (although note that there is a clean-channel command for that purpose).
 
     :param args: the arguments parsed from the command line.
-    :para gc: The GroupConfig; i.e. all the charms and their config.
+    :param gc: The GroupConfig; i.e. all the charms and their config.
     """
     for cp in gc.projects(select=args.charms):
         try:
@@ -1055,7 +1055,7 @@ def repair_resource(args: argparse.Namespace,
     that case it'll need to be done manually.
 
     :param args: the arguments parsed from the command line.
-    :para gc: The GroupConfig; i.e. all the charms and their config.
+    :param gc: The GroupConfig; i.e. all the charms and their config.
     """
     for cp in gc.projects(select=args.charms):
         if '/' in args.channel:
