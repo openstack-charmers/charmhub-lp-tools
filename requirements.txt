@@ -19,3 +19,4 @@ jinja2-humanize-extension
 requests
 requests-cache
 schema
+GitPython

@@ -4,3 +4,15 @@ class CharmcraftError504(Exception):
 
 class InvalidRiskLevel(Exception):
     """Invalid risk level."""
+
+
+class BranchNotFound(Exception):
+    """Branch not found."""
+
+
+class CharmNameNotFound(Exception):
+    """Charm name not found."""
+
+
+class ProjectVarsNotFound(Exception):
+    """project.vars section not found."""

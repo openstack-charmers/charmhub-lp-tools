@@ -1,0 +1,6 @@
+[gerrit]
+host=review.example.com
+port=1234
+project=foo/charm-fake.git
+
+defaultbranch=stable/jammy
