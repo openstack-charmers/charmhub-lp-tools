@@ -106,8 +106,8 @@ class TestOsciSync(unittest.TestCase):
         recipe.name = 'charm-fake.stable-jammy.22.04'
         recipe.web_link = 'https://example.com/charm-fake/%s' % recipe.name
         recipe.auto_build_channels = {'core18': 'latest/edge'}
-        recipes = [recipe]
-        charm_project.lpt.get_charm_recipes.return_value = recipes
+        recipes = {recipe.name: recipe}
+        charm_project.lp_recipes = recipes
         gc.projects.return_value = [charm_project]
 
         osci_sync.osci_sync(args, gc)
@@ -132,7 +132,7 @@ class TestOsciSync(unittest.TestCase):
         recipe.lp_save.assert_called_with()
 
         # re-run with a missing recipe
-        charm_project.lpt.get_charm_recipes.return_value = []
+        charm_project.lp_recipes = {}
         args.i_really_mean_it = False
         with mock.patch('sys.exit') as sys_exit:
             def fake_exit(code):

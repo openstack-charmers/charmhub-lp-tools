@@ -603,6 +603,7 @@ class CharmProject:
         self.charmhub_name: str = config.get('charmhub')  # type: ignore
         self.launchpad_project: str = config.get('launchpad')  # type: ignore
         self._lp_project = None
+        self._lp_recipes = None  # type: Dict[str, TypeLPObject]
         self.repository: str = config.get('repository')  # type: ignore
         self.project_group: str = config.get('project_group')  # type: ignore
         self._lp_repo = None
@@ -726,6 +727,16 @@ class CharmProject:
         self._lp_repo = self.lpt.get_git_repository(
             self.lp_team, self.lp_project)
         return self._lp_repo
+
+    @property
+    def lp_recipes(self) -> TypeLPObject:
+        """Get all the recipes defined in Launchpad."""
+        if not self._lp_recipes:
+            recipes = self.lpt.get_charm_recipes(self.lp_team,
+                                                 self.lp_project)
+            self._lp_recipes = {r.name: r for r in recipes}
+
+        return self._lp_recipes
 
     def ensure_git_repository(self,
                               dry_run: bool = True
@@ -910,6 +921,8 @@ class CharmProject:
                         project=self.lp_project,
                         store_name=self.charmhub_name,
                         channels=build_from['channels'])
+                    # clear cached list of recipes
+                    self._lp_recipes = None
                     print('done')
 
             else:

@@ -220,13 +220,10 @@ def osci_sync(args: argparse.Namespace,
             project=charm_project.lp_project.name,
             branch=branch_name.replace('/', '-'),
             track=track)
-        recipes = charm_project.lpt.get_charm_recipes(
-            charm_project.lp_team,
-            charm_project.lp_project)
         try:
-            lp_recipe = [r for r in recipes if r.name == recipe_name][0]
+            lp_recipe = charm_project.lp_recipes[recipe_name]
             logger.info('Using recipe %s', lp_recipe.web_link)
-        except IndexError:
+        except KeyError:
             logger.error('Recipe %s not found in %s',
                          recipe_name, charm_project)
             # TODO(freyes): handle recipe creation when the recipe was not
