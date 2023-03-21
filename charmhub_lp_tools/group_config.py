@@ -81,7 +81,7 @@ class GroupConfig:
             with open(file, 'r') as f:
                 group_config = yaml.safe_load(f)
                 # validate the content against the schema
-                config_schema.validate(group_config)
+                group_config = config_schema.validate(group_config)
             logger.debug('group_config is: \n%s', pprint.pformat(group_config))
             project_defaults = group_config.get('defaults', {})
             # foo/bar/openstack.yaml -> openstack

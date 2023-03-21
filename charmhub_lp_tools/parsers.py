@@ -13,13 +13,18 @@
 # limitations under the License.
 """Helpers to parse different strings with known formats."""
 
+import re
+
 from typing import Tuple
 
 from charmhub_lp_tools.constants import (
     LIST_OF_RISKS,
     Risk,
 )
-from charmhub_lp_tools.exceptions import InvalidRiskLevel
+from charmhub_lp_tools.exceptions import (
+    InvalidRiskLevel,
+    InvalidSeriesName,
+)
 
 
 def parse_channel(value: str) -> Tuple[str, str]:
@@ -46,3 +51,19 @@ def parse_channel(value: str) -> Tuple[str, str]:
         return (value, Risk.STABLE.value)
 
     raise ValueError('Could not parse %s' % value)
+
+
+def parse_series_name(branch_name: str) -> str:
+    """Parse a branch name to extract a series name.
+
+    :param branch_name: the git branch name (e.g. 'refs/heads/stable/jammy')
+    :returns: a valid series name
+    """
+    if branch_name in ['refs/heads/master', 'refs/heads/main']:
+        return 'trunk'
+
+    m = re.match(r'^refs/heads/stable/(.*)$', branch_name)
+    if not m:
+        raise InvalidSeriesName(branch_name)
+
+    return m.group(1)

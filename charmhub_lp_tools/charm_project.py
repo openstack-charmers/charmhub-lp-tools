@@ -34,8 +34,14 @@ import tenacity
 
 from .launchpadtools import LaunchpadTools, TypeLPObject
 from .charmhub import authorize_from_macaroon_dict, get_store_client
-from .exceptions import CharmcraftError504
-from .parsers import parse_channel
+from .exceptions import (
+    CharmcraftError504,
+    InvalidSeriesName,
+)
+from .parsers import (
+    parse_channel,
+    parse_series_name,
+)
 
 # build states
 BUILD_SUCCESSFUL = 'Successfully built'
@@ -620,28 +626,22 @@ class CharmProject:
         self._channels = None  # type: Optional[Set]
         self._raw_charm_info = None
         self._charmhub_tracks = None  # type: Optional[List[str]]
+        self._lp_series = None  # type: Optional[Dict[str, TypeLPObject]]
 
         self.branches: Dict[str, Dict[str, Any]] = {}
 
         self._add_branches(config.get('branches', {}))
 
     def _add_branches(self, branches_spec: Dict[str, Dict]) -> None:
-        default_branch_info = {
-            'auto-build': True,
-            'upload': True,
-            'recipe-name': '{project}.{branch}.{track}'
-        }
         for branch, branch_info in branches_spec.items():
             ref = f'refs/heads/{branch}'
-            if ref not in self.branches:
-                self.branches[ref] = dict(default_branch_info)
             if type(branch_info) != dict:
                 raise ValueError(f'{self.charmhub_name}\n'
                                  f'Expected a dict for key branches, '
                                  f' instead got {type(branch_info)} - '
                                  f' {branch_info}')
-
-            self.branches[ref].update(branch_info)
+            assert ref not in self.branches.keys()
+            self.branches[ref] = branch_info
 
         # clear cached channels
         self._channels = None
@@ -751,6 +751,94 @@ class CharmProject:
             self._lp_recipes = {r.name: r for r in recipes}
 
         return self._lp_recipes
+
+    @property
+    def lp_series(self) -> Optional[Dict[str, TypeLPObject]]:
+        """Get list of series defined in Launchpad for this project."""
+        if not self._lp_series:
+            self._lp_series = {s.name: s for s in self.lp_project.series}
+
+        return self._lp_series
+
+    def ensure_series(self,
+                      branches: Optional[List[str]],
+                      dry_run: bool = True
+                      ) -> Optional[Dict[str, TypeLPObject]]:
+        """Ensure the series declared for the project exist in Launchpad.
+
+        :param branches: Filter out branches that are not in this list
+        :param dry_run: if True, the changes are not committed to Launchpad and
+                        only logged.
+        :returns: a dict with the ``series`` objects created, the key is the
+                  series name and the value is the LP object.
+        """
+        created_series = {}  # type: Dict[str, TypeLPObject]
+        for branch_name, branch_info in self.branches.items():
+            if not branch_info['enabled']:
+                logger.debug('Skipping not enabled branch %s', branch_name)
+                continue
+            if (branches and
+                    branch_name.split('/', 2)[2] not in branches):
+                logger.debug('Skipping branch %s per user requested filtering',
+                             branch_name)
+                continue
+            try:
+                series_name = parse_series_name(branch_name)
+            except InvalidSeriesName as ex:
+                self.log.debug('Invalid series name for branch %s',
+                               branch_name,
+                               exc_info=ex, stack_info=True)
+                self.log.warning(('Skipping series creation for branch %s due '
+                                  'to invalid series name'), branch_name)
+            else:
+                if series_name not in self.lp_series:
+                    series = self.create_series(series_name,
+                                                branch_info['series-summary'],
+                                                dry_run)
+                    if not dry_run and series:
+                        self.log.info('New created series %s (%s)',
+                                      series.name, series.web_link)
+                        created_series[series_name] = series
+                else:
+                    series = self.lp_series[series_name]
+
+                if series:
+                    series.active = branch_info['series-active']
+                    series.status = branch_info['series-status']
+                    # Mandatory fields, with this we avoid clearing them
+                    if branch_info['series-title']:
+                        series.title = branch_info['series-title']
+                    if branch_info['series-summary']:
+                        series.summary = branch_info['series-summary']
+                if dry_run:
+                    self.log.info('NOT committing changes, running in '
+                                  'dry-run mode')
+                else:
+                    self.log.debug('Saving changes to series %s', series.name)
+                    series.lp_save()
+
+        return created_series
+
+    def create_series(self,
+                      name: str,
+                      summary: str,
+                      dry_run: bool = True) -> TypeLPObject:
+        """Create a new series in Launchpad.
+
+        :param name: the name of the series to be created
+        :param summary: the summary of the series
+        :param dry_run: if True, the changes are not committed to Launchpad and
+                        only logged.
+        :returns: the LP series created
+        """
+        if not summary:
+            summary = name
+        if dry_run:
+            self.log.info(('NOT creating the series %s with summary %s '
+                           '(dry-run mode)'), name, summary)
+        else:
+            return self.lpt.create_project_series(self.lp_project,
+                                                  name=name, summary=summary)
 
     def ensure_git_repository(self,
                               dry_run: bool = True

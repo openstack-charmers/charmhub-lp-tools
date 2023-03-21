@@ -312,8 +312,8 @@ class LaunchpadTools:
         """Delete the charm recipe by name that it finds first.
 
         :param recipe_name: the recipe name to delete.
-        :param owner: the owner of the recipe
-        :param project: the LP project that has the recipe
+        :param lp_owner: the owner of the recipe
+        :param lp_project: the LP project that has the recipe
         :raises: KeyError on failure to delete.
         """
         recipes = self.get_charm_recipes(lp_owner, lp_project)
@@ -328,3 +328,15 @@ class LaunchpadTools:
             raise KeyError(
                 f"Recipe {recipe_name} not found for project "
                 f"{lp_project.name} (owner {lp_owner.name}")
+
+    def create_project_series(self,
+                              lp_project: TypeLPObject,
+                              name: str,
+                              summary: str,):
+        """Create a project series.
+
+        :param project: the LP project that has the recipe
+        :param name: the name of the series to be created
+        :param summary: the summary of the series
+        """
+        return lp_project.newSeries(name=name, summary=summary)

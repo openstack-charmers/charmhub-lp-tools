@@ -35,6 +35,7 @@ jobs:
         target:
           - pep8
           - docs
+          - check-lp-builder-config
           # - mypy
     steps:
       - uses: actions/checkout@v1
