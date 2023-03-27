@@ -17,7 +17,14 @@ import argparse
 import logging
 import sys
 
+from typing import (
+    Dict,
+    Optional,
+)
+
+from .charm_project import CharmProject
 from .group_config import GroupConfig
+from .launchpadtools import TypeLPObject
 
 
 logger = logging.getLogger(__name__)
@@ -51,6 +58,32 @@ def setup_parser(subparser: argparse.ArgumentParser):
     return parser
 
 
+def print_summary(cp: CharmProject,
+                  series: Dict[str, Optional[TypeLPObject]],
+                  dry_run: bool):
+    """Print a summary of the series created.
+
+    :param cp: charm project where the series were created.
+    :param series: map with the series created.
+    :param dry_run: identify if this is a dry-run or not to inform the user
+                    about this.
+    """
+    if not series.keys():
+        # nothing to print
+        return
+
+    if dry_run:
+        print('Series that would have been created for charm %s'
+              % cp.charmhub_name)
+    else:
+        print('Series created for charm %s' % cp.charmhub_name)
+
+    for series_name, series in series.items():
+        print('    %s: %s' % (
+            series_name,
+            series.web_link if series else '(dry-run)'))
+
+
 def ensure_series(args: argparse.Namespace,
                   gc: GroupConfig,
                   ) -> None:
@@ -64,5 +97,6 @@ def ensure_series(args: argparse.Namespace,
         sys.exit(1)
 
     for cp in charm_projects:
-        cp.ensure_series(branches=args.git_branches,
-                         dry_run=not args.i_really_mean_it)
+        series = cp.ensure_series(branches=args.git_branches,
+                                  dry_run=not args.i_really_mean_it)
+        print_summary(cp, series, dry_run=not args.i_really_mean_it)
