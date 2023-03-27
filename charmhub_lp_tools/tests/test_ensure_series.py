@@ -55,3 +55,29 @@ class TestEnsureSeries(BaseTest):
 
         charm_project.ensure_series.assert_called_with(branches=git_branches,
                                                        dry_run=True)
+
+    def test_print_summary(self):
+        cp = mock.MagicMock()
+        cp.charmhub_name = 'foobar'
+        zed_series = mock.MagicMock()
+        zed_series.web_link = 'http://example.com/zed'
+        with mock.patch('builtins.print') as print:
+            ensure_series.print_summary(cp, {'zed': None}, dry_run=True)
+            print.assert_has_calls(
+                [
+                    mock.call(
+                        'Series that would have been created for charm foobar'
+                    ),
+                    mock.call('    zed: (dry-run)'),
+                ]
+            )
+        with mock.patch('builtins.print') as print:
+            ensure_series.print_summary(cp, {'zed': zed_series}, dry_run=False)
+            print.assert_has_calls(
+                [
+                    mock.call(
+                        'Series created for charm foobar'
+                    ),
+                    mock.call('    zed: %s' % zed_series.web_link),
+                ]
+            )

@@ -795,10 +795,10 @@ class CharmProject:
                     series = self.create_series(series_name,
                                                 branch_info['series-summary'],
                                                 dry_run)
+                    created_series[series_name] = series
                     if not dry_run and series:
                         self.log.info('New created series %s (%s)',
                                       series.name, series.web_link)
-                        created_series[series_name] = series
                 else:
                     series = self.lp_series[series_name]
 
@@ -836,6 +836,7 @@ class CharmProject:
         if dry_run:
             self.log.info(('NOT creating the series %s with summary %s '
                            '(dry-run mode)'), name, summary)
+            return None
         else:
             return self.lpt.create_project_series(self.lp_project,
                                                   name=name, summary=summary)
