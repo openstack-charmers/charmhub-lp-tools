@@ -492,7 +492,6 @@ def parse_args(argv: Optional[List[str]],
         dest='tracks',
         action='append',
         metavar='TRACK',
-        required=True,
         help='Select only tracks that match TRACK',
     )
     ch_report_commands.add_argument(
@@ -941,14 +940,20 @@ def ch_report_main(args: argparse.Namespace,
     """
     klass = get_charmhub_report_klass(args.format)
     report = klass(args.output)
-    for track in args.tracks:
-        for cp in gc.projects(select=args.charms):
-            # if the charm doesn't declare its use of the track, then we skip
-            # it.
-            if track not in cp.tracks:
-                logger.debug('Skipping %s since it does not use track %s',
-                             cp.charmhub_name, track)
+    tracks = None  # type: Optional[Set[str]]
+    tracks_filter = set(args.tracks or [])  # type: Set[str]
+    for cp in gc.projects(select=args.charms):
+        # if the charm doesn't declare its use of the track, then we skip it.
+        if tracks_filter:
+            tracks = tracks_filter.intersection(cp.tracks)
+            if not tracks:
+                logger.debug(('Skipping %s since it does not match any of the '
+                              'tracks: %s'), cp.charmhub_name, tracks_filter)
                 continue
+        else:
+            tracks = cp.tracks
+
+        for track in tracks:
             for risk in ['edge', 'beta', 'candidate', 'stable']:
                 channel = CharmChannel(cp, f'{track}/{risk}')
                 # get all the revisions, without filtering by base nor arch.
