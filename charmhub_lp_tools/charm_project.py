@@ -382,17 +382,18 @@ class CharmChannel:
                 all_revisions.add(revision_num)
         return all_revisions
 
-    def get_revisions_for_bases(self,
-                                bases: List[str],
-                                arch: Optional[str] = None,
-                                ignore_arches: Optional[List[str]] = None,
-                                ) -> Set[int]:
-        """Decode the channel and return a set of (revision, [arches]).
+    def get_revisions_for_bases_by_arch(
+        self,
+        bases: List[str],
+        arch: Optional[str] = None,
+        ignore_arches: Optional[List[str]] = None,
+    ) -> Dict[str, int]:
+        """Decode the channel and return a set of {arch: revision}.
 
         :param base: base channel.
         :param arch: Filter by architecture
         :param ignore_arches: Filter by ignoring the following list of arches.
-        :returns: The revision id associated with this channel.
+        :returns: The highest revision for each arch.
         """
         if ignore_arches is None:
             _ignore_arches = set()
@@ -444,12 +445,45 @@ class CharmChannel:
                 if delete:
                     del revisions_[all_arch]
         # now just keep the highest revision for each arch.
-        highest_revisions = collections.defaultdict(int)
+        highest_revisions: Dict[str, int] = {}
         for k, v in revisions_.items():
             highest_revisions[k] = list(sorted(revisions_[k]))[-1]
-        # and collect the final set of revisions to keep.
-        revisions = set(v for v in highest_revisions.values())
-        return revisions
+        return highest_revisions
+
+    @staticmethod
+    def revisions_from_revisions_by_arch(
+        arch_revisions: Dict[str, int]
+    ) -> List[int]:
+        """Return a sorted list of revisions from arch_revisions.
+
+        :param arch_revisions: dictionary of arch -> revision_id
+        :return: sorted list of revision_id.
+        """
+        revisions = set(v for v in arch_revisions.values())
+        return sorted(revisions)
+
+    @staticmethod
+    def str_revisions_by_arch(
+        arch_revisions: Dict[str, int]
+    ) -> str:
+        """Provide a str representation of the arch_revisions dict."""
+        return ','.join(f"{a}: {r}" for a, r in arch_revisions.items())
+
+    def get_revisions_for_bases(self,
+                                bases: List[str],
+                                arch: Optional[str] = None,
+                                ignore_arches: Optional[List[str]] = None,
+                                ) -> List[int]:
+        """Decode the channel and return a set of revisions across all arches.
+
+        :param base: base channel.
+        :param arch: Filter by architecture
+        :param ignore_arches: Filter by ignoring the following list of arches.
+        :returns: The revision ids associated with this channel.
+        """
+        return self.revisions_from_revisions_by_arch(
+            self.get_revisions_for_bases_by_arch(
+                bases, arch, ignore_arches))
 
     def find_resources(
             self,
@@ -1687,7 +1721,8 @@ class CharmProject:
                        to_risk: str,
                        branch: Optional[str] = None,
                        dry_run: bool = True,
-                       retries: int = 0) -> Optional[Set[int]]:
+                       retries: int = 0,
+                       force: bool = False) -> Optional[Set[int]]:
         """Copy revisions from one risk to another.
 
         This function finds the appropriate revisions (according to the bases
@@ -1708,6 +1743,8 @@ class CharmProject:
         :param dry_run: if True, just print what would be done, rather than
             doing it.
         :param retries: Retry if charmhub responds with a 500 error.
+        :param force: Copy the revisions even if they will overwrite newer
+            versions.
         :returns: Set of revisions that were copied.
         :raises: AssertionError if the git branch couldn't be determined.
         """
@@ -1732,12 +1769,15 @@ class CharmProject:
                        channel.name, ','.join(bases))
 
         # copy the revisions as per the bases to the target risk.
-        revisions = list(sorted(channel.get_revisions_for_bases(bases)))
-        self.log.debug("Found revisions to copy as: %s",
-                       ','.join(str(r) for r in revisions))
+        arch_revisions = channel.get_revisions_for_bases_by_arch(bases)
+        revisions = CharmChannel.revisions_from_revisions_by_arch(
+            arch_revisions)
         if not revisions:
             self.log.info("No revisions found, so nothing to do")
             return
+        self.log.info(
+            "Found revisions to copy by architecture as: %s",
+            CharmChannel.str_revisions_by_arch(arch_revisions))
 
         metadata = channel.get_charm_metadata_for_channel()
         resource_names = channel.get_resources_from_metadata(metadata or {})
@@ -1775,19 +1815,46 @@ class CharmProject:
             destination_channel = CharmChannel(channel.project, destination)
 
             # get the revisions currently on the destination channel.
-            destination_revisions = (destination_channel
-                                     .get_revisions_for_bases(bases))
-            self.log.info("Revisions found for %s: %s",
-                          destination_channel.name,
-                          ", ".join(str(r) for r in destination_revisions))
+            destination_arch_revisions = (
+                destination_channel.get_revisions_for_bases_by_arch(bases))
+            self.log.info(
+                "Revisions found for %s: %s",
+                destination_channel.name,
+                CharmChannel.str_revisions_by_arch(destination_arch_revisions))
 
-            for revision in revisions:
-                if revision in destination_revisions:
-                    self.log.info(
-                        "Revision %s already existing in channel %s.",
-                        revision,
-                        destination_channel.name)
+            # don't duplicate releases to the same channel.
+            revision_pairs: Set[Tuple[int, int | None]] = set()
+            for arch, revision in arch_revisions.items():
+                dest_revision = destination_arch_revisions.get(arch)
+                if (revision, dest_revision) in revision_pairs:
                     continue
+                revision_pairs.add((revision, dest_revision))
+                if dest_revision is not None:
+                    if revision == dest_revision:
+                        self.log.info(
+                            "Revision %s already existing in channel %s.",
+                            revision,
+                            destination_channel.name)
+                        continue
+                    if revision < dest_revision:
+                        if not force:
+                            self.log.info(
+                                "Revision %s is lower than existing revision "
+                                "%s in channel %s for arch %s. skipping!",
+                                revision,
+                                dest_revision,
+                                destination_channel.name,
+                                arch)
+                            continue
+                        else:
+                            self.log.info(
+                                "Revision %s is lower than existing revision "
+                                "%s in channel %s for arch %s, but force set "
+                                "so releasing ...",
+                                revision,
+                                dest_revision,
+                                destination_channel.name,
+                                arch)
                 self.log.info('Releasing %s revision %s into channel %s',
                               self.charmhub_name,
                               revision,
