@@ -642,6 +642,15 @@ def parse_args(argv: Optional[List[str]],
         default=3,
         help='Retry calls when charmhub issues a 504 error',
     )
+    copy_revisions_command.add_argument(
+        '--force',
+        dest='force',
+        action='store_true',
+        default=False,
+        help=('If this flag is used, older (lower value) revisions will be '
+              'copied even if a younger (higher value) revision already '
+              'exists for that arch/base combination.')
+    )
     copy_revisions_command.set_defaults(func=copy_revisions)
 
     # repair resources
@@ -1020,7 +1029,8 @@ def copy_revisions(args: argparse.Namespace,
             cp.copy_revisions(channel=src_channel,
                               to_risk=args.to_risk,
                               dry_run=not args.confirmed,
-                              retries=args.retries)
+                              retries=args.retries,
+                              force=args.force)
         except Exception as e:
             logger.info("Couldn't copy revision for: %s", cp.charmhub_name)
             logger.error("Exception %s", str(e))

@@ -182,12 +182,12 @@ class TestCharmChannel(BaseTest):
                                                        'yoga/stable')
             self.assertEqual(charm_channel
                              .get_revisions_for_bases(bases=['22.04']),
-                             {79})
+                             [79])
             charm_channel = charm_project.CharmChannel(self.project,
                                                        'latest/edge')
             self.assertEqual(charm_channel
                              .get_revisions_for_bases(bases=['22.04']),
-                             {96, 93, 94, 95})
+                             [93, 94, 95, 96])
 
     @mock.patch('charmhub_lp_tools.charm_project.get_store_client')
     def test_release(self, get_store_client):
