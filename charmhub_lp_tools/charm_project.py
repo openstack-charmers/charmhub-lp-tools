@@ -669,7 +669,7 @@ class CharmProject:
     def _add_branches(self, branches_spec: Dict[str, Dict]) -> None:
         for branch, branch_info in branches_spec.items():
             ref = f'refs/heads/{branch}'
-            if type(branch_info) != dict:
+            if not isinstance(branch_info, dict):
                 raise ValueError(f'{self.charmhub_name}\n'
                                  f'Expected a dict for key branches, '
                                  f' instead got {type(branch_info)} - '
