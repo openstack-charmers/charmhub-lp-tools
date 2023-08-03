@@ -20,8 +20,9 @@ jobs:
     - id: publish
       if: github.ref == 'refs/heads/main'
       uses: snapcore/action-publish@v1
-      with:
+      env:
         # See: https://github.com/snapcore/action-publish#store-login
-        store_login: ${{ secrets.STORE_LOGIN }}
+        SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.STORE_LOGIN }}
+      with:
         snap: ${{ steps.build.outputs.snap }}
         release: edge
