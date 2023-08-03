@@ -175,6 +175,9 @@ class PlainBuildsReport(BaseBuildsReport):
         series_arch = f'{build.distro_series.name}/{build_arch_tag}'
         if build.buildstate != 'Successfully built':
             build_log = build.build_log_url
+        elif (build.buildstate == 'Successfully built' and
+              build.store_upload_revision):
+            build_log = build.store_upload_error_message
         else:
             build_log = ''
 
@@ -186,7 +189,7 @@ class PlainBuildsReport(BaseBuildsReport):
                            build.revision_id)
             revision = None
 
-        if build.store_upload_status == 'Uploaded':
+        if build.store_upload_revision:
             store_rev = build.store_upload_revision
         else:
             store_rev = build.store_upload_error_message
