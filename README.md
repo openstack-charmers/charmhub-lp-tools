@@ -64,3 +64,24 @@ sudo snap connect charmhub-lp-tool:password-manager-service
 
 > **_Note:_** the `password-manager-service` interface is used to store the
 > Launchpad access token.
+
+## Configuration
+
+charmhub-lp-tool reads the configuration file from the following locations:
+
+* `${XDG_CONFIG_HOME}/.config/charmhub_lp_tools/config.yaml`
+* `${HOME}/.config/charmhub_lp_tools/config.yaml`
+
+Example configuration file:
+
+``` yaml
+config_dir: /home/ubuntu/charmed-openstack-info/charmed_openstack_info/data/lp-builder-config/
+log_level: WARNING
+```
+
+### Options
+
+| Key        | Description                   |
+|------------|-------------------------------|
+| config_dir | Path to the lp-builder-config |
+| log_level  | Default log level             |
