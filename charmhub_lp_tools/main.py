@@ -56,6 +56,7 @@ except ImportError:
 
 from . import ensure_series
 from . import osci_sync
+from . import revisions
 from .group_config import GroupConfig
 from .launchpadtools import (
     LaunchpadTools,
@@ -707,6 +708,7 @@ def parse_args(argv: Optional[List[str]],
 
     osci_sync.setup_parser(subparser)
     ensure_series.setup_parser(subparser)
+    revisions.setup_parser(subparser)
 
     # finally, parse the args and return them.
     args = parser.parse_args(argv)

@@ -382,12 +382,31 @@ class CharmChannel:
                 all_revisions.add(revision_num)
         return all_revisions
 
-    def get_revisions_for_bases_by_arch(
+    @property
+    def bases(self) -> List[str]:
+        """Retrieve the bases registered against a channel.
+
+        :returns: a sorted unique list of bases.
+        """
+        bases: Set[str] = set()
+        for channel_def in self.channel_map:
+            chan_track = channel_def['channel']['track']
+            chan_risk = channel_def['channel']['risk']
+            chan_base = channel_def['channel']['base']
+            logger.debug(
+                "base found: track: %s, risk: %s, arch: %s, release: %s",
+                chan_track, chan_risk,
+                chan_base['architecture'], chan_base['channel'])
+            if (chan_track, chan_risk) == (self.track, self.risk):
+                bases.add(chan_base['channel'])
+        return sorted(bases)
+
+    def get_all_revisions_for_bases_by_arch(
         self,
         bases: List[str],
         arch: Optional[str] = None,
         ignore_arches: Optional[List[str]] = None,
-    ) -> Dict[str, int]:
+    ) -> Dict[str, Set[int]]:
         """Decode the channel and return a set of {arch: revision}.
 
         :param base: base channel.
@@ -444,10 +463,31 @@ class CharmChannel:
                         delete = True
                 if delete:
                     del revisions_[all_arch]
+        return revisions_
         # now just keep the highest revision for each arch.
         highest_revisions: Dict[str, int] = {}
         for k, v in revisions_.items():
-            highest_revisions[k] = list(sorted(revisions_[k]))[-1]
+            highest_revisions[k] = list(sorted(v))[-1]
+        return highest_revisions
+
+    def get_revisions_for_bases_by_arch(
+        self,
+        bases: List[str],
+        arch: Optional[str] = None,
+        ignore_arches: Optional[List[str]] = None,
+    ) -> Dict[str, int]:
+        """Decode the channel and return a set of {arch: revision}.
+
+        :param base: base channel.
+        :param arch: Filter by architecture
+        :param ignore_arches: Filter by ignoring the following list of arches.
+        :returns: The highest revision for each arch.
+        """
+        # just keep the highest revision for each arch.
+        highest_revisions: Dict[str, int] = {}
+        for k, v in self.get_all_revisions_for_bases_by_arch(
+                bases, arch, ignore_arches).items():
+            highest_revisions[k] = list(sorted(v))[-1]
         return highest_revisions
 
     @staticmethod
