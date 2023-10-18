@@ -24,6 +24,7 @@ from typing import (
     Dict,
     List,
     Set,
+    Union,
 )
 
 from prettytable import PrettyTable
@@ -94,8 +95,8 @@ def setup_parser(
 
 
 def get_revisions(channel: CharmChannel,
-                  args_bases: List[str] | None,
-                  args_arches: List[str] | None
+                  args_bases: Union[List[str], None],
+                  args_arches: Union[List[str], None],
                   ) -> Dict[str, Dict[str, List[int]]]:
     """Get the revisions by base -> arch -> [revisions].
 
