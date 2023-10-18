@@ -19,7 +19,8 @@ import itertools
 import logging
 import subprocess
 import tempfile
-from typing import (Any, Dict, Generator, List, Tuple, IO, Optional, Set)
+from typing import (Any, Dict, Generator, List, Tuple, IO, Optional, Set,
+                    Union)
 import sys
 import time
 import yaml
@@ -1863,7 +1864,7 @@ class CharmProject:
                 CharmChannel.str_revisions_by_arch(destination_arch_revisions))
 
             # don't duplicate releases to the same channel.
-            revision_pairs: Set[Tuple[int, int | None]] = set()
+            revision_pairs: Set[Tuple[int, Union[int, None]]] = set()
             for arch, revision in arch_revisions.items():
                 dest_revision = destination_arch_revisions.get(arch)
                 if (revision, dest_revision) in revision_pairs:
