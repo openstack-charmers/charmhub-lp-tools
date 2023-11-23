@@ -20,7 +20,6 @@ import os
 import pathlib
 import textwrap
 from typing import (
-    Any,
     Dict,
     List,
     Set,
@@ -179,7 +178,7 @@ def format_as_rst(
         channel: CharmChannel,
         results: Dict[str, Dict[str, List[int]]],
         indent_level: int = 0) -> str:
-    """Format the output as an ReST table (sphinx)
+    """Format the output as an ReST table (sphinx).
 
     This produces the table element with a group tab and then the included
     rows.
@@ -187,7 +186,7 @@ def format_as_rst(
     :param results: the results to format into a table.
     :returns: the formatted string
     """
-    rst_channel = format_channel_as_rst(results,indent_level=indent_level + 1)
+    rst_channel = format_channel_as_rst(results, indent_level=indent_level + 1)
     if not rst_channel:
         return ""
     return "\n".join([
@@ -200,7 +199,7 @@ def format_as_rst(
 def format_channel_as_rst(
         results: Dict[str, Dict[str, List[int]]],
         indent_level: int = 0) -> str:
-    """Format the output as an ReST table (sphinx)
+    """Format the output as an ReST table (sphinx).
 
     This produces the table element; it'll need a header and group tabs created
     by another section.
@@ -232,19 +231,19 @@ def format_channel_as_rst(
     return "\n".join(output)
 
 
-def format_rst_tabs(indent_level: int=0) -> str:
+def format_rst_tabs(indent_level: int = 0) -> str:
     """Return the grouptab for an RST table.
 
     :returns: a string of lines, indented, for the tabs.
     """
     return textwrap.indent(
         "\n".join([
-            f'.. tabs::',
+            '.. tabs::',
             '',
         ]), '   ' * indent_level)
 
 
-def format_rst_grouptab(header: str, indent_level: int=0) -> str:
+def format_rst_grouptab(header: str, indent_level: int = 0) -> str:
     """Return the grouptab for an RST table.
 
     :param header: the string to put in the header.
@@ -257,7 +256,7 @@ def format_rst_grouptab(header: str, indent_level: int=0) -> str:
         ]), '   ' * indent_level)
 
 
-def format_rst_header(indent_level: int=0, num_cols=None) -> str:
+def format_rst_header(indent_level: int = 0, num_cols=None) -> str:
     """Return the header for rst table.
 
     :param indent_level: how var (*3 spaces) to indent this header.
@@ -290,7 +289,6 @@ def format_rst_row(columns: List[str],
     :param indent_level: the level (*3 space) to indent the section.
     :returns: a string of lines, indented, for the row.
     """
-
     try:
         lines: List[str] = ["* - {}".format(columns[0])]
     except IndexError:
@@ -304,18 +302,18 @@ def format_rst_row(columns: List[str],
             lines.append(f"{prefix}- {empty_column}")
         prefix = "  "
     lines.append('')
-    lines = [l.rstrip() for l in lines]
+    lines = [line.rstrip() for line in lines]
     return textwrap.indent("\n".join(lines), '   ' * indent_level)
 
 
 def format_as_html(channel: CharmChannel,
-                    results: Dict[str, Dict[str, List[int]]]) -> str:
+                   results: Dict[str, Dict[str, List[int]]]) -> str:
     """Format the output as a HTML page.
 
     :param results: the results to format into a table.
     :returns: the formatted string
     """
-    raise NotImplemented("HTML reports aren't implemented yet.")
+    raise NotImplementedError("HTML reports aren't implemented yet.")
 
 
 def print_revisions(

@@ -3,7 +3,8 @@ theblues
 libcharmstore
 launchpadlib
 prettytable
-humanize<4.0.0  # newer versions of humanize are incompatible with jinja2-humanize-extension
+# humanize<4.0.0  # newer versions of humanize are incompatible with jinja2-humanize-extension
+humanize
 backports.zoneinfo; python_version < '3.9'
 SecretStorage  # LP: #1923727
 macaroonbakery
