@@ -19,8 +19,7 @@ import itertools
 import logging
 import subprocess
 import tempfile
-from typing import (Any, Dict, Generator, List, Tuple, IO, Optional, Set,
-                    Union)
+from typing import (Any, Dict, Generator, List, Tuple, IO, Optional, Set)
 import sys
 import time
 import yaml
@@ -465,11 +464,6 @@ class CharmChannel:
                 if delete:
                     del revisions_[all_arch]
         return revisions_
-        # now just keep the highest revision for each arch.
-        highest_revisions: Dict[str, int] = {}
-        for k, v in revisions_.items():
-            highest_revisions[k] = list(sorted(v))[-1]
-        return highest_revisions
 
     def get_revisions_for_bases_by_arch(
         self,
@@ -1864,7 +1858,7 @@ class CharmProject:
                 CharmChannel.str_revisions_by_arch(destination_arch_revisions))
 
             # don't duplicate releases to the same channel.
-            revision_pairs: Set[Tuple[int, Union[int, None]]] = set()
+            revision_pairs: Set[Tuple[int, Optional[int]]] = set()
             for arch, revision in arch_revisions.items():
                 dest_revision = destination_arch_revisions.get(arch)
                 if (revision, dest_revision) in revision_pairs:

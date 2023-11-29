@@ -72,7 +72,6 @@ def setup_parser(
     parser.add_argument(
         '--format',
         dest='format',
-        # choices=('table', 'json', 'html'),
         choices=('table', 'json', 'rst'),
         default='table',
         type=str.lower,
@@ -100,8 +99,8 @@ def get_revisions(channel: CharmChannel,
     """Get the revisions by base -> arch -> [revisions].
 
     :param channel: the charm channel to work against.
-    :param bases: Optional list of bases to restrict report to.
-    :param arches: Optional list of arches to restrict report to.
+    :param args_bases: Optional list of bases to restrict report to.
+    :param args_arches: Optional list of arches to restrict report to.
     :returns: a mapping of base -> arch -> List of revisions
     """
     revisions: Dict[str, Dict[str, Set[int]]] = {}
